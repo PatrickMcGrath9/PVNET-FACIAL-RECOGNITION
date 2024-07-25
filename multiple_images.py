@@ -69,6 +69,7 @@ snapshot_interval = 5  # seconds
 snapshot_image = None
 
 num_screenshot = 0
+max_key = None
 try:
     while True:
         ret, frame = cap.read()
@@ -98,11 +99,14 @@ try:
                 # print(matched_dict)
                 num_screenshot += 1
                 last_snapshot_time = current_time
-            else:
-                # print(matched_dict)
+            if num_screenshot >= 3:
                 max_key = max(matched_dict, key=matched_dict.get)
-                print(max_key)
-                break
+                # print(max_key)
+        if max_key:
+            cv2.putText(frame, f'This face match with: {max_key}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        
+        # Display the live webcam feed with detection boxes
+        cv2.imshow('Webcam Feed', frame)
 
         # Display the snapshot image next to the live feed
         if snapshot_image is not None:
