@@ -3,6 +3,8 @@ from deepface import DeepFace
 import time
 import os
 import pandas as pd
+import tkinter as tk
+from tkinter import messagebox
 
 # Function to get the absolute path of the database folder
 def get_db_path():
@@ -17,21 +19,6 @@ def get_folder_names(database_path):
     for i in folder_name:
         matched_image[i] = 0
     return matched_image
-    
-
-# Get the database path
-db_path = get_db_path()
-folders_dict = get_folder_names(db_path)
-
-# Check if the database path exists
-if not os.path.exists(db_path):
-    raise FileNotFoundError(f"Database folder not found at {db_path}")
-
-# Load the pre-trained face detector from OpenCV
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-
-# Create a VideoCapture object to access the webcam
-cap = cv2.VideoCapture(0)
 
 # Function to recognize faces in the snapshot image
 def recognize_face(snapshot, dict):
@@ -57,71 +44,127 @@ def recognize_face(snapshot, dict):
             return dict
         else:
             print("No match found")
+            return dict
     except Exception as e:
         print("Error during facial recognition:", str(e))
+        return dict
     finally:
         if os.path.exists(temp_image_path):
             os.remove(temp_image_path)
 
-# Initialize variables
-last_snapshot_time = time.time()
-snapshot_interval = 5  # seconds
-snapshot_image = None
+def restart_recognition():
+    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict
+    last_snapshot_time = time.time()
+    snapshot_image = None
+    num_screenshot = 0
+    max_key = None
+    folders_dict = get_folder_names(db_path)
+    print("Face recognition restarted.")
 
-num_screenshot = 0
-max_key = None
-try:
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Failed to capture image")
-            break
+def run_face_recognition():
+    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict, cap, running 
+    # Initialize variables
+    last_snapshot_time = time.time()
+    snapshot_interval = 5  # seconds
+    snapshot_image = None
 
-        # Convert the frame to grayscale for face detection
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    num_screenshot = 0
+    max_key = None
 
-        # Detect faces in the frame
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30), flags=cv2.CASCADE_SCALE_IMAGE)
+    # Create a VideoCapture object to access the webcam
+    cap = cv2.VideoCapture(0)
+    running = True
 
-        # Draw rectangles around detected faces
-        for (x, y, w, h) in faces:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)  # Blue box for all faces
+    try:
+        while running:
+            ret, frame = cap.read()
+            if not ret:
+                print("Failed to capture image")
+                break
 
-        # Display the live webcam feed with detection boxes
-        cv2.imshow('Webcam Feed', frame)
+            # Convert the frame to grayscale for face detection
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Take a snapshot every `snapshot_interval` seconds
-        current_time = time.time()
-        if current_time - last_snapshot_time >= snapshot_interval:
-            if num_screenshot < 3:
-                snapshot_image = frame.copy()
-                matched_dict = recognize_face(snapshot_image, folders_dict)
-                # print(matched_dict)
-                num_screenshot += 1
-                last_snapshot_time = current_time
-            if num_screenshot >= 3:
-                max_key = max(matched_dict, key=matched_dict.get)
-                # print(max_key)
-        if max_key:
-            cv2.putText(frame, f'This face match with: {max_key}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
-        
-        # Display the live webcam feed with detection boxes
-        cv2.imshow('Webcam Feed', frame)
+            # Detect faces in the frame
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30), flags=cv2.CASCADE_SCALE_IMAGE)
 
-        # Display the snapshot image next to the live feed
-        if snapshot_image is not None:
-            combined_frame = cv2.hconcat([frame, snapshot_image])
-            cv2.imshow('Combined Feed', combined_frame)
-        else:
-            cv2.imshow('Combined Feed', frame)
+            # Draw rectangles around detected faces
+            for (x, y, w, h) in faces:
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)  # Blue box for all faces
 
-        # Press 'q' to exit the loop
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            # Take a snapshot every `snapshot_interval` seconds
+            current_time = time.time()
+            if current_time - last_snapshot_time >= snapshot_interval:
+                if num_screenshot < 3:
+                    snapshot_image = frame.copy()
+                    matched_dict = recognize_face(snapshot_image, folders_dict)
+                    # print(matched_dict)
+                    num_screenshot += 1
+                    last_snapshot_time = current_time
+                if num_screenshot >= 3:
+                    max_key = max(matched_dict, key=matched_dict.get)
+                    # print(max_key)
+            if max_key:
+                cv2.putText(frame, f'This face match with: {max_key}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            
+            # Display the live webcam feed with detection boxes
+            cv2.imshow('Webcam Feed', frame)
 
-except KeyboardInterrupt:
-    print("Exiting...")
-finally:
-    # Release the webcam and close all OpenCV windows
-    cap.release()
+            # Display the snapshot image next to the live feed
+            if snapshot_image is not None:
+                combined_frame = cv2.hconcat([frame, snapshot_image])
+                cv2.imshow('Combined Feed', combined_frame)
+            else:
+                cv2.imshow('Combined Feed', frame)
+
+            # Press 'q' to exit the loop
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+    except KeyboardInterrupt:
+        print("Exiting...")
+    finally:
+        # Release the webcam and close all OpenCV windows
+        cap.release()
+        cv2.destroyAllWindows()
+
+def on_quit():
+    global running
+    running = False
+    if cap.isOpened():
+        cap.release()
     cv2.destroyAllWindows()
+    root.quit()
+
+# Initialize GUI
+root = tk.Tk()
+root.title("Face Recognition")
+frame = tk.Frame(root)
+frame.pack()
+
+restart_button = tk.Button(frame, text="Restart Face Recognition", command=restart_recognition)
+restart_button.pack(side=tk.LEFT)
+
+quit_button = tk.Button(frame, text="Quit", command=on_quit)
+quit_button.pack(side=tk.LEFT)
+
+# Load the pre-trained face detector from OpenCV
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+# Get the database path
+db_path = get_db_path()
+folders_dict = get_folder_names(db_path)
+
+# Check if the database path exists
+if not os.path.exists(db_path):
+    raise FileNotFoundError(f"Database folder not found at {db_path}")
+
+
+# Start face recognition in a separate thread
+import threading
+face_recognition_thread = threading.Thread(target=run_face_recognition)
+face_recognition_thread.start()
+
+# Run the GUI main loop
+root.mainloop()
+
