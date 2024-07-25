@@ -53,16 +53,17 @@ def recognize_face(snapshot, dict):
             os.remove(temp_image_path)
 
 def restart_recognition():
-    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict
+    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict, all_zero
     last_snapshot_time = time.time()
     snapshot_image = None
     num_screenshot = 0
     max_key = None
+    all_zero = False
     folders_dict = get_folder_names(db_path)
     print("Face recognition restarted.")
 
 def run_face_recognition():
-    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict, cap, running 
+    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict, cap, running, all_zero
     # Initialize variables
     last_snapshot_time = time.time()
     snapshot_interval = 5  # seconds
@@ -70,6 +71,7 @@ def run_face_recognition():
 
     num_screenshot = 0
     max_key = None
+    all_zero = False
 
     # Create a VideoCapture object to access the webcam
     cap = cv2.VideoCapture(0)
@@ -102,9 +104,12 @@ def run_face_recognition():
                     num_screenshot += 1
                     last_snapshot_time = current_time
                 if num_screenshot >= 3:
+                    all_zero = all(value == 0 for value in matched_dict.values())
                     max_key = max(matched_dict, key=matched_dict.get)
                     # print(max_key)
-            if max_key:
+            if all_zero:
+                cv2.putText(frame, f"First time seeing this face!", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            elif max_key:
                 cv2.putText(frame, f'This face match with: {max_key}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
             
             # Display the live webcam feed with detection boxes
