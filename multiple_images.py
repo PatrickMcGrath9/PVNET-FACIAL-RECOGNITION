@@ -37,10 +37,15 @@ def recognize_face(snapshot, dict):
                         base_name = os.path.basename(identity)
                         for key in dict:
                             if key in base_name:
+<<<<<<< Updated upstream
                                 dict[key] += 1
                         print(base_name)
                     for distance in result_df['distance']:
                         print(distance)
+=======
+                                dict[key] += distance_inverse_squared
+            print("Tally dictionary",dict)
+>>>>>>> Stashed changes
             return dict
         else:
             print("No match found")
