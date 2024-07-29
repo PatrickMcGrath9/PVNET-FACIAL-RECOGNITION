@@ -53,17 +53,18 @@ def recognize_face(snapshot, dict):
             os.remove(temp_image_path)
 
 def restart_recognition():
-    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict, all_zero
+    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict, all_zero, face_detected
     last_snapshot_time = time.time()
     snapshot_image = None
     num_screenshot = 0
     max_key = None
     all_zero = False
     folders_dict = get_folder_names(db_path)
+    face_detected = False
     print("Face recognition restarted.")
 
 def run_face_recognition():
-    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict, cap, running, all_zero
+    global last_snapshot_time, snapshot_image, num_screenshot, max_key, folders_dict, cap, running, all_zero, face_detected
     # Initialize variables
     last_snapshot_time = time.time()
     snapshot_interval = 5  # seconds
@@ -72,6 +73,7 @@ def run_face_recognition():
     num_screenshot = 0
     max_key = None
     all_zero = False
+    face_detected = False
 
     # Create a VideoCapture object to access the webcam
     cap = cv2.VideoCapture(0)
@@ -93,24 +95,32 @@ def run_face_recognition():
             # Draw rectangles around detected faces
             for (x, y, w, h) in faces:
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)  # Blue box for all faces
+                face_detected = True
+                
 
-            # Take a snapshot every `snapshot_interval` seconds
-            current_time = time.time()
-            if current_time - last_snapshot_time >= snapshot_interval:
-                if num_screenshot < 3:
-                    snapshot_image = frame.copy()
-                    matched_dict = recognize_face(snapshot_image, folders_dict)
-                    # print(matched_dict)
-                    num_screenshot += 1
-                    last_snapshot_time = current_time
-                if num_screenshot >= 3:
-                    all_zero = all(value == 0 for value in matched_dict.values())
-                    max_key = max(matched_dict, key=matched_dict.get)
-                    # print(max_key)
+            if face_detected:
+                # Take a snapshot every `snapshot_interval` seconds
+                current_time = time.time()
+                if current_time - last_snapshot_time >= snapshot_interval:
+                    if num_screenshot < 3:
+                        # Add a delay of unit 5 from when webcam recognize face to when webcame take a screen shot
+                        time.sleep(5)
+                        
+                        snapshot_image = frame.copy()
+                        matched_dict = recognize_face(snapshot_image, folders_dict)
+                        # print(matched_dict)
+                        num_screenshot += 1
+                        last_snapshot_time = current_time
+                    if num_screenshot >= 3:
+                        all_zero = all(value == 0 for value in matched_dict.values())
+                        max_key = max(matched_dict, key=matched_dict.get)
+                        face_detected = False
+                        # print(max_key)
             if all_zero:
                 cv2.putText(frame, f"First time seeing this face!", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
             elif max_key:
-                cv2.putText(frame, f'This face match with: {max_key}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+                cv2.putText(frame, f'Good to see you again {max_key}!!', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+                # print(f"You are {max_key}")
             
             # Display the live webcam feed with detection boxes
             cv2.imshow('Webcam Feed', frame)
