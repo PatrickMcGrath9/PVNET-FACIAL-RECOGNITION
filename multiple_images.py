@@ -33,14 +33,15 @@ def recognize_face(snapshot, dict):
             print("Match found:")
             for result_df in results:
                 if isinstance(result_df, pd.DataFrame) and 'identity' in result_df.columns:
-                    for identity in result_df['identity']:
-                        base_name = os.path.basename(identity)
+                    for i in range(len(result_df['identity'])):
+                        base_name = os.path.basename(result_df['identity'][i])
+                        distance = result_df['distance'][i]
+                        distance_inverse_squared = (1-distance)**2
+                        print(base_name, distance, distance_inverse_squared)
                         for key in dict:
                             if key in base_name:
-                                dict[key] += 1
-                        print(base_name)
-                    for distance in result_df['distance']:
-                        print(distance)
+                                dict[key] += distance_inverse_squared
+            # print("Tally dictionary",dict)
             return dict
         else:
             print("No match found")
@@ -105,7 +106,7 @@ def run_face_recognition():
                     if num_screenshot < 3:
                         # Add a delay of unit 5 from when webcam recognize face to when webcam take a screenshot
                         time.sleep(5)
-                        
+
                         snapshot_image = frame.copy()
                         matched_dict = recognize_face(snapshot_image, folders_dict)
                         # print(matched_dict)
@@ -182,4 +183,5 @@ face_recognition_thread.start()
 
 # Run the GUI main loop
 root.mainloop()
+
 
