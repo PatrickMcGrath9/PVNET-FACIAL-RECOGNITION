@@ -103,7 +103,7 @@ def run_face_recognition():
                 current_time = time.time()
                 if current_time - last_snapshot_time >= snapshot_interval:
                     if num_screenshot < 3:
-                        # Add a delay of unit 5 from when webcam recognize face to when webcame take a screen shot
+                        # Add a delay of unit 5 from when webcam recognize face to when webcam take a screenshot
                         time.sleep(5)
                         
                         snapshot_image = frame.copy()
