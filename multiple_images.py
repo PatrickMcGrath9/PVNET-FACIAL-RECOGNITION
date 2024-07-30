@@ -40,8 +40,7 @@ def recognize_face(snapshot, dict):
                         print(base_name, distance, distance_inverse_squared)
                         for key in dict:
                             if key in base_name:
-                                dict[key] += 1
-                        print(base_name)
+                                dict[key] += distance_inverse_squared
             print("Tally dictionary",dict)
             # print("Tally dictionary",dict)
             return dict
