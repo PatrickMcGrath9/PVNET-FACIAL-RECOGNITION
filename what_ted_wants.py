@@ -3,6 +3,7 @@ from deepface import DeepFace
 import time
 import os
 import pandas as pd
+import pyttsx3
 # Function to get the absolute path of the database folder
 def get_db_path():
     # Assuming the database folder is in the same directory as this script
@@ -15,6 +16,9 @@ def get_folder_names(database_path):
     for i in folder_name:
         matched_image[i] = 0
     return matched_image
+
+# Initialize text-to-speech engine
+engine = pyttsx3.init()
     
 # Get the database path
 db_path = get_db_path()
@@ -58,12 +62,13 @@ def recognize_face(snapshot, dict):
             os.remove(temp_image_path)
 # Initialize variables
 last_snapshot_time = time.time()
-snapshot_interval = 5  # seconds
+snapshot_interval = 2  # seconds
 snapshot_image = None
 
 
 max_key = None
 all_zero = False
+recently_announced = set()
 try:
     while True:
         face_detected = False
@@ -82,7 +87,7 @@ try:
         # Display the live webcam feed with detection boxes
         cv2.imshow('Webcam Feed', frame)
 
-        if face_detected:
+        if face_detected and (len(faces) == 1):
             # Take a snapshot every `snapshot_interval` seconds
             current_time = time.time()
             if current_time - last_snapshot_time >= snapshot_interval:
@@ -97,10 +102,26 @@ try:
                 # print(max_key)
                 matched_dict.update(dict.fromkeys(matched_dict, 0))
 
-        if all_zero:
+
+                if max_key not in recently_announced:
+                    recently_announced.add(max_key)
+                    if all_zero:
+                        engine.say(f'Hello! Welcome')
+                    elif max_key:
+                        engine.say(f'Good to see you again {max_key}!!')
+                    engine.runAndWait()
+                    if len(recently_announced) > 2:  # Keep only the last 5 unique names
+                        recently_announced.pop()
+                    # if time.sleep(60):
+                    #     recently_announced.pop()
+        if len(faces) > 1:
+            cv2.putText(frame, f"Too many faces on screen", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        elif all_zero:
             cv2.putText(frame, f"First time seeing this face!", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            # engine.say(f'Hello! Welcome')
         elif max_key:
             cv2.putText(frame, f'Good to see you again {max_key}!!', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+            # engine.say(f'Good to see you again {max_key}!!')
             # print(f"You are {max_key}")
 
         # Display the live webcam feed with detection boxes
