@@ -23,7 +23,7 @@ total_images = 0
 for person_name in os.listdir(database_path):
     person_folder = os.path.join(database_path, person_name)
     if os.path.isdir(person_folder):
-        total_images += len([name for name in os.listdir(person_folder) if name.endswith(('.jpg', '.jpeg', '.png'))])
+        total_images += len([name for name in os.listdir(person_folder) if name.endswith(('.JPG', '.jpg', '.jpeg', '.png'))])
 print(f"total image in database are {total_images}")
 
 # Initialize the counter of how many images are already encoded
