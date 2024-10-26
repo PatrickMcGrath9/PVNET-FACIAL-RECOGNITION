@@ -7,7 +7,7 @@ import time
 import threading
 
 # Adjust frame processing frequency
-frame_skip = 1  # Process every third frame
+frame_skip = 3  # Process every third frame
 frame_count = 0
 
 # Adjust the scaling factor for faster processing

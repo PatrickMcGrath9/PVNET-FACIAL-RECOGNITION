@@ -3,7 +3,8 @@ import os
 import pickle
 
 # Path to the database
-database_path = "C:/Users/facerecognition\Documents\GitHub\PVNET-FACIAL-RECOGNITION\Database"
+database_path = "C:/Users/Educa/Documents/GitHub/PVNET-FACIAL-RECOGNITION/Database"
+
 
 # Load existing encodings if they exist, if not initiallize them
 if os.path.exists("encodings.pkl"):
