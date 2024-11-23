@@ -229,7 +229,7 @@ import queue
 # Parameters
 frame_skip = 2
 frame_count = 0
-scaling_factor = 1  # Scale down for faster processing
+scaling_factor = 1.1  # Scale down for faster processing
 database_path = "C:/Users/Educa/Documents/GitHub/PVNET-FACIAL-RECOGNITION/Database"
 encoding_file = "encodings.pkl"
 
@@ -247,9 +247,9 @@ engine = pyttsx3.init()
 last_spoken_time = {}
 face_detection_time = {}
 SPEAK_INTERVAL = 300  # 1 hour for known individuals
-UNKNOWN_SPEAK_INTERVAL = 30  # 30 seconds for unknown individuals
+UNKNOWN_SPEAK_INTERVAL = 60  # 30 seconds for unknown individuals
 DETECTION_TIME_REQUIRED = .35
-UNKNOWN_DETECTION_TIME_REQUIRED = 0.85  # Time required for unknown individuals
+UNKNOWN_DETECTION_TIME_REQUIRED = 0.5  # Time required for unknown individuals
 
 # Initialize webcam
 video_capture = cv2.VideoCapture(0)
@@ -355,7 +355,7 @@ def daily_encoding_update():
 
 # Schedule daily encoding update at 1 PM
 scheduler = BackgroundScheduler()
-scheduler.add_job(daily_encoding_update, 'cron', hour=13)
+scheduler.add_job(daily_encoding_update, 'cron', hour=14)
 scheduler.start()
 
 # Main loop for continuous recognition
