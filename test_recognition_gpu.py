@@ -500,7 +500,7 @@ import datetime
 # Parameters
 frame_skip = 2
 frame_count = 0
-scaling_factor = 1.1  # Scale down for faster processing
+scaling_factor = .75  # Scale down for faster processing
 database_path = "C:/Users/Educa/Documents/GitHub/PVNET-FACIAL-RECOGNITION/Database"
 encoding_file = "encodings.pkl"
 
@@ -522,37 +522,45 @@ last_spoken_time = {}
 face_detection_time = {}
 SPEAK_INTERVAL = 300  # 1 hour for known individuals
 UNKNOWN_SPEAK_INTERVAL = 60  # 30 seconds for unknown individuals
-DETECTION_TIME_REQUIRED = .35
-UNKNOWN_DETECTION_TIME_REQUIRED = 0.5  # Time required for unknown individuals
+DETECTION_TIME_REQUIRED = .3
+UNKNOWN_DETECTION_TIME_REQUIRED = 0.75 # Time required for unknown individuals
 
 # Initialize webcam
-video_capture = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+video_capture = cv2.VideoCapture(0, cv2.CAP_DSHOW)#library for streamlining camera video process
+video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280) #monitor feed size resolution
+video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720) #monitor feed size resolution
 video_capture.set(cv2.CAP_PROP_FPS, 30)
-video_capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # Enable auto-exposure
+video_capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # Enable auto-exposure, lighting
 
 # Create queue for speech requests
-speech_queue = queue.Queue()
+speech_queue = queue.Queue() #needed for seperate voice lines, one at a time voicelines after detection
 
 def speech_worker():
     """Threaded function to process speech requests from the queue."""
     while True:
-        name = speech_queue.get()  # Get a name from the queue
-        if name is None:
+        name = speech_queue.get()  # Get a name from the queue, FIFO
+        if name is None: #no one there
             break  # Exit if None is received (for clean shutdown)
         
         if name == "Unknown":
             engine.say("Welcome to PVNet")
         else:
-            engine.say(f"Hello {name}")
+            if name == "Tiffany":
+                engine.say(f"Hello {name} borbnation will fluorish.")
+            elif name == "Patrick":
+                engine.say(f"Hello {name} slayer of bugnation")
+            elif name == "Tyler":
+                engine.say(f"Hello {name}, ruler of the Monkeys")
+            else:
+                engine.say(f"Hello {name}")
+            
         engine.runAndWait()
 
-# Start the speech worker thread
+# Start the speech worker thread; divides resources
 speech_thread = threading.Thread(target=speech_worker, daemon=True)
 speech_thread.start()
 
-def request_speak(name):
+def request_speak(name): #like add to a queue
     """Function to add a name to the speech queue.""" 
     speech_queue.put(name)
 
@@ -575,7 +583,7 @@ try:
             break  # Exit the loop and stop the program
         
         ret, frame = video_capture.read()
-
+        #ret is if the camera is running, frame is data face recog
         # If no frame is captured (camera might be disconnected), try reconnecting
         if not ret:
             print("Warning: No frame detected, trying to reconnect...")
@@ -647,7 +655,7 @@ try:
                 if name not in face_names:
                     del face_detection_time[name]
 
-        for (top, right, bottom, left), name in zip(face_locations, face_names):
+        for (top, right, bottom, left), name in zip(face_locations, face_names): #tracking box in frames
             top = int(top / scaling_factor)
             right = int(right / scaling_factor)
             bottom = int(bottom / scaling_factor)
@@ -658,9 +666,9 @@ try:
             font_scale = (bottom - top) / 150
             cv2.putText(frame, name, (left + 6, bottom - 6), cv2.FONT_HERSHEY_DUPLEX, font_scale, (255, 255, 255), 1)
 
-        cv2.imshow('Video', frame)
+        cv2.imshow('Video', frame) #showing to monitor
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('q'): #keyboard command to quit
             break
 
 finally:
@@ -670,3 +678,5 @@ finally:
     cv2.destroyAllWindows()
     executor.shutdown()
     speech_thread.join()  # Wait for the speech thread to finish
+
+
