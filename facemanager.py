@@ -1,55 +1,59 @@
-import json #for serializing objects
-import gzip #for compression
+import json
 import cv2
+import face_recognition
+import os
 
-class FaceManager: #TODO make singleton
+class FaceManager:  # TODO make singleton
     class Face:
-        def __init__(self, p_encoding, p_name, p_location):
-            self.encoding = p_encoding
-            self.name = p_name
-            self.location = p_location
+        def __init__(self, encoding, name, location):
+            self.encoding = encoding
+            self.name = name
+            self.location = location
 
     class params:
-        CONFIDENCE_NEEDED = 50
+        CONFIDENCE_THRESHOLD = 0.6
+        ENCODINGS_PATH = "encodings.json"
 
     faces = []
 
-    def __init__():
-        pass
+    def __init__(self):
+        self.load_encodings_from_file()
 
-    def __del__():
-        pass
+    def load_encodings_from_file(self):
+        if os.path.exists(self.params.ENCODINGS_PATH):
+            with open(self.params.ENCODINGS_PATH, "rt") as file:
+                self.faces = json.load(file)
+        else:
+            self.faces = []
 
-    def load_encodings_from_file():
-        if os.path.exists(encodings_path):
-            with open(encodings_path, "rt") as f:
-                faces = json.load(f)
-            faces = []
+    def write_encodings_to_file(self):
+        with open(self.params.ENCODINGS_PATH, "wt") as file:
+            json.dump(self.faces, file)
 
-    def write_encodings_to_file():
-        with open(encodings_path, 'wt') as file:
-            file.write(json.dump(faces))
+    async def find_faces(self, frame):
+        face_locations = face_recognition.face_locations(frame)
+        face_encodings = face_recognition.face_encodings(frame, face_locations)
 
-    async def find_faces(self, frame): #TODO
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        face_rectangles = face_cascade.detectMultiScale(gray)
+        for location, encoding in zip(face_locations, face_encodings):
+            name = await self.identify_face(encoding)
+            yield location, name
 
-        async for face in self.add_faces(gray, face_rectangles):
-            yield face
-            
-    async def create_faces(self, frame, rectangles):
-        for location in rectangles:
-            #TODO capture image solely of face and store it
-            face = FaceManager.Face(await self.encode_face(), await self.identify_face(gray, location), location)
-            yield face
+    async def identify_face(self, encoding) -> str:
+        if not self.faces:
+            return "Unknown"
 
-    async def encode_face(self, face:FaceManager.Face):
-        pass
+        known_encodings = [face["encoding"] for face in self.faces]
+        known_names = [face["name"] for face in self.faces]
 
-    async def identify_face(self, frame, location)->str:
-        (x,y,w,h) = location
-        face_fisher_recognizer = cv2.face.FisherFaceRecognizer_create()
-        label, confidence = face_fisher_recognizer.predict(frame[y:y+h, x:x+w])
-        if confidence >= FaceManager.params.CONFIDENCE_NEEDED:
-            return label
+        matches = face_recognition.compare_faces(known_encodings, encoding, tolerance=self.params.CONFIDENCE_THRESHOLD)
+        name = "Unknown"
+
+        if True in matches:
+            match_index = matches.index(True)
+            name = known_names[match_index]
+
+        return name
+
+    async def add_face(self, name, encoding):
+        self.faces.append({"name": name, "encoding": encoding})
+        self.write_encodings_to_file()
