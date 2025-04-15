@@ -1,75 +1,197 @@
 import cv2 #OpenCV, computer vision library. TODO CPU ONLY!
-import ttsmanager
-import facemanager
+import re #regex, for input validation
+from subprocess import Popen #for invoking facemanager
+import socket
 
-class Client: #TODO make singleton
+#TODO WebUI
+import fastapi
+import uvicorn
+import asyncio
+import aiohttp
+import json
+import time
+
+class Client:
     class params:
-        SHOW_LIVE_FEED = True #whether webcam should be shown, or just the faces as captured
-        FRAME_WIDTH = 1280
-        FRAME_HEIGHT = 720
-        FRAME_FPS = 10 #may not work
-        FRAME_SKIP = 1 #skip x frames, process x+1
+        FRAME_WIDTH = 640
+        FRAME_HEIGHT = 360
+        FRAME_RATE_SKIP = 0
+        FRAME_RATE = 0
+        FRAME_RATE_TARGET = 10
         FRAME_COUNTER = 0
         RETRY_TIMEOUT = 10 #TODO used with async.timeout
-        DB_PATH = "DB/encoding"
-        STOP_TIME = ["11:59", "12:59", "13:59", "14:59", "15:59", "16:59", "17:59"] #when client should shut down??? TODO remove this lol. If necessary make program self destruct after x time
+        FACEMANAGER_IP = ""
+        INITIALIZED = False
 
     def __init__(self):
-        self.current_frame = None
-        self.face_manager = facemanager.FaceManager() #TODO remove, instead query user on startup ip of facemanager
-        #self.tts_manager = ttsmanager.TTSManager()
-        self.window = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
-        self.set_window()
+        self.params.INITIALIZED = False
 
     def __del__(self):
-        #del self.tts_manager
-        self.window.release()
+        self.deinitialize()
         cv2.destroyAllWindows()
-        del self.face_manager
+        self.fm_client.close()
 
-    def get_frame(self):
-        has_frame, frame = self.window.read()
-        self.current_frame =  None if not has_frame else frame
+    def initialize(self):
+        self.current_frame = None
+        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+        self.set_capture()
+        self.params.INITIALIZED = True
+        self.fm_client = aiohttp.ClientSession()
 
-    def set_window(self):
-        self.window.set(cv2.CAP_PROP_FRAME_WIDTH, self.params.FRAME_WIDTH) #window width
-        self.window.set(cv2.CAP_PROP_FRAME_HEIGHT, self.params.FRAME_HEIGHT) #window height
-        self.window.set(cv2.CAP_PROP_FPS, self.params.FRAME_FPS) #window framerate
-        self.window.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3) # set auto exposure factor TODO necessary?
+    def deinitialize(self):
+        self.capture.release()
+        self.params.INITIALIZED = False
+
+    def set_capture(self):
+        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.params.FRAME_WIDTH) #capture width
+        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.params.FRAME_HEIGHT) #capture height
+        self.capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+        self.capture.set(cv2.CAP_PROP_FPS, self.params.FRAME_RATE_TARGET) #try and set target FPS
+        self.params.FRAME_RATE = self.capture.get(cv2.CAP_PROP_FPS) #retrieve actual FPS
+        self.params.FRAME_RATE_SKIP = int(self.params.FRAME_RATE / self.params.FRAME_RATE_TARGET) #calculate frame skip
+        self.params.FRAME_RATE_SKIP = self.params.FRAME_RATE_SKIP if self.params.FRAME_RATE_SKIP > 0 else 1 #if no skip needed, resort to 1 rather than 0
 
     def draw_face_box(self, location, name):
+        '''
+        Not needed since switching to WebUI which will display face crops rather than drawing box around faces
+        '''
         (x, y, w, h) = location
         cv2.rectangle(self.current_frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
         cv2.rectangle(self.current_frame, (x, y), (x+w, y-35), (0, 0, 255), cv2.FILLED)
         cv2.putText(self.current_frame, name, (x, y), cv2.FONT_HERSHEY_DUPLEX, 1.25, (255, 255, 255), 1, bottomLeftOrigin=False)
 
-    def show_face_crop(self, location):
-        (x, y, w, h) = location
-        cv2.imshow(f"{x} {y} {w} {h}", self.current_frame[y:y+h, x:x+w])
-
     def cycle(self):
-        #apply frame skip
-        if self.params.FRAME_COUNTER % self.params.FRAME_SKIP != 0:
+        has_frame, frame = self.capture.read()
+        if not has_frame: #if there is no frame
+            return (False, self.current_frame)
+
+        if self.params.FRAME_COUNTER % self.params.FRAME_RATE_SKIP != 0:
+            self.params.FRAME_COUNTER += 1
+            return (False, self.current_frame)
+        if self.params.FRAME_COUNTER >= self.params.FRAME_RATE:
             self.params.FRAME_COUNTER = 0
-            return
+
+        self.current_frame = frame
         self.params.FRAME_COUNTER += 1
-        
-        self.get_frame()
 
-        #signal face manager to find faces
-        for face in self.face_manager.find_faces(self.current_frame):
-            self.draw_face_box(face.location, face.name)
-            if not self.params.SHOW_LIVE_FEED:
-                self.show_face_crop(face.location) #TODO needs to be implemented better than just spam
-            #do whatever else with the face identity, like tts
-        
-        if self.params.SHOW_LIVE_FEED:
-            cv2.imshow('Video', self.current_frame) #display video input + changes to monitor
-        cv2.waitKey(1)
-        self.frame = None
-        #TODO web ui that shows live feed AND most recent faces
+        return (True, self.current_frame)
 
-if __name__ == "__main__":
-    client = Client()
-    while True:
-        client.cycle()
+global facemanager #global reference to facemanager process (if needed)
+global client #global reference to client object
+facemanager = None
+client = Client()
+app = fastapi.FastAPI()
+
+@app.get("/video_feed")
+async def video_feed(request:fastapi.Request,response:fastapi.Response, width:int=640, height:int=480,fps_target:int=60,identify:bool=False):
+    '''
+    Called to to display a stream of frames from the camera. Can specify four optional URL parameters:
+        width: the desired width of the video capture (depends on what resolutions camera supports) (larger resolutions reduce framerate)
+        height: the desired height of the video capture (depends on what resolutions camera supports) (larger resolutions reduce framerate)
+        fps_target: the desired framerate for the video capture (depends on what framerates camera supports)
+        identify: should frames be sent to FaceManager and identified?
+    Sample request: http://localhost:9253/video_feed?width=1280&height=720&fps_target=5&identify=true
+    Note: you must close the old tab and open a new one for each request
+    '''
+    if not client.params.INITIALIZED: #initialize client if not already
+        try:
+            client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = width,height
+            client.params.FRAME_RATE_TARGET = fps_target
+            client.initialize()
+        except Exception as e:
+            response.status_code = 400
+            return fastapi.responses.PlainTextResponse(f"Client not initialized: {e}")
+    if identify and client.params.FACEMANAGER_IP == "":
+        response.status_code = 400
+        return fastapi.responses.PlainTextResponse("Cannot identify, FaceManager not connected")
+    
+    async def stream_mpeg():
+        while True: #until something disrupts the connection
+            try:
+                if await request.is_disconnected():
+                    raise Exception("Client disconnected")
+
+                #capture frame
+                has_frame, _ = client.cycle()
+                if not has_frame:
+                    continue
+
+                if identify: #if request for identifying
+                    try:
+                        async with client.fm_client.post(url=f"{client.params.FACEMANAGER_IP}/identify_faces", data=cv2.imencode('.jpg', client.current_frame)[1].tobytes()) as resp: #send image to face manager
+                            if resp.status == 200:
+                                data = await resp.json() #get back data
+                                for name,location in data.items():
+                                    client.draw_face_box(location, name) #draw boxes around faces
+                    except aiohttp.client_exceptions.InvalidUrlClientError: #if facemanager not launched
+                        pass
+                    except Exception as e:
+                        print(f"Issue identifying faces: {e}")
+
+                img_bytes = cv2.imencode('.jpg', client.current_frame)[1].tobytes()
+                # write frame as part of multipart back to client
+                yield b'--frame\r\n' + b'Content-Type: image/jpeg\r\n\r\n' + img_bytes + b'\r\n'
+                await asyncio.sleep(0.000000001)  #allow buffer to flush
+            except Exception as e:
+                print(f"Error streaming video: {e}")
+                client.deinitialize()
+                break #client probably just disconnected
+    
+    response.headers["Content-Type"] = "multipart/x-mixed-replace; boundary=frame"
+    stream = fastapi.responses.StreamingResponse(stream_mpeg(), media_type="multipart/x-mixed-replace; boundary=frame")
+    return stream
+
+@app.get("/recent_faces")
+async def recent_faces(response:fastapi.Response):
+    #ask face manager for list of recent faces
+    return fastapi.responses.PlainTextResponse("Recent faces data placeholder")
+
+@app.get("/facemanager_setup")
+async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip:str="",port:str=""):
+    '''
+    Called to setup the FaceManager, can accept two optional URL parameters:
+        ip: the IP of a remote FaceManager that is already launched
+        port: the port that the FaceManager is accepting requests to
+    Sample Request: http://localhost:9253/facemanager_setup
+    Note: Remote FaceManager has not been tested yet
+    '''
+    if ip == "": #if no IP specified
+        try:
+            facemanager = Popen(['python', 'facemanager.py']) #run the facemanager
+        except Exception as e:
+            response.status_code = 400
+            return fastapi.responses.PlainTextResponse(f"There was an issue with launching FaceManager locally:{e}")
+        ip = "127.0.0.1" #set IP to localhost
+        port = 9254
+    else:
+        try:
+            pattern = r"/((?:\d{1,3}\.){3}\d{1,3}):(\d{1,5})/gm"  # used to find ip and port
+            ip_port = re.match(pattern, f"{ip}:{port}") #search for it
+            if ip_port is None: #if there is no match
+                raise Exception("IP is invalid")
+        except:
+            response.status_code = 400
+            return fastapi.responses.PlainTextResponse("IP & Port Invalid")
+    url = f"http://{ip}:{port}"
+    start = time.time()
+    timeout = 300
+    try:
+        while time.time() < start + timeout: #keep trying to connect until the connection is timed out
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as resp:
+                        if resp.status == 200: #if facemanager responds, then set the IP
+                            start = -1
+                            client.params.FACEMANAGER_IP = url
+            except Exception as e:
+                pass
+        if start != -1:
+            raise Exception("Connection timed out")
+    except Exception as e:
+        response.status_code = 400
+        return fastapi.responses.PlainTextResponse(f"There was an issue connecting to FaceManager:{e}")
+    client.params.FACEMANAGER_IP = url
+    return fastapi.responses.PlainTextResponse("Facemanager Connected")
+
+if __name__ == "__main__":      
+    uvicorn.run(app, port=9253)
