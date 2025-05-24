@@ -16,6 +16,9 @@
 
 import os
 import cv2
+import fastapi
+import asyncio
+import uvicorn
 
 class DatabaseManager:
     def __init__(self, audit_dir="DB/audit"):
@@ -30,9 +33,34 @@ class DatabaseManager:
         """
         prefix = f"unknown_group_{group_id}"
         # find how many files already use this prefix
-        existing = [fn for fn in os.listdir(self.audit_dir) 
-                    if fn.startswith(prefix) and fn.endswith(".jpg")]
-        count = len(existing)
-        filename = f"{prefix}_{count}.jpg"
+        filename = f"{prefix}.jpg"
         filepath = os.path.join(self.audit_dir, filename)
         cv2.imwrite(filepath, image)
+
+
+app = fastapi.FastAPI()
+@app.get("/")
+async def index():
+    return fastapi.responses.PlainTextResponse("Database running")
+
+@app.get("/audit")
+async def audit_get():
+    image_file_name = os.listdir("DB/audit")[0]
+    id = image_file_name[len(image_file_name) - image_file_name[::-1].index("_"):image_file_name.index(".")]
+
+    image_path = "DB/audit/" + image_file_name
+    image = cv2.imread(image_path)
+
+    if image is None:
+        print(image_path)
+
+    return fastapi.responses.JSONResponse({id:image.tolist()})
+
+@app.put("/audit")
+async def audit_put(audit_id, database_id):
+    for image in os.listdir("DB/audit"):
+        if audit_id == image[len(image) - image[::-1].index("_"):image.index(".")]:
+            return fastapi.responses.PlainTextResponse("success")
+    return fastapi.responses.PlainTextResponse("id not found", status_code=404)
+if __name__ == "__main__":
+    uvicorn.run(app)
