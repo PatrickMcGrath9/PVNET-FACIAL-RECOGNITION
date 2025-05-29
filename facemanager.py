@@ -8,7 +8,6 @@ import fastapi
 import socket #for retrieving host
 import uvicorn
 from numpy import float32
-from starlette.responses import JSONResponse
 
 
 class FaceManager: #TODO make singleton
@@ -78,7 +77,7 @@ async def identify_faces(request:fastapi.Request):
             continue
         face['location'] = location
         resp[idx] = face
-    return JSONResponse(content=resp)
+    return fastapi.responses.JSONResponse(content=resp)
     
 if __name__ == "__main__":
     uvicorn.run(app, port=9254)

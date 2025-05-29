@@ -1,5 +1,6 @@
 import cv2 #OpenCV, computer vision library. TODO CPU ONLY!
 import re #regex, for input validation
+
 from subprocess import Popen #for invoking facemanager
 
 #TODO WebUI
@@ -25,6 +26,8 @@ class Client:
         self.params.INITIALIZED = False
         self.current_frame = None
         self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+        self.set_capture()
+        self.set_detector()
         self.params.INITIALIZED = True
 
     def __del__(self):
@@ -45,7 +48,7 @@ class Client:
         self.params.FRAME_RATE_SKIP = self.params.FRAME_RATE_SKIP if self.params.FRAME_RATE_SKIP > 0 else 1 #if no skip needed, resort to 1 rather than 0
         self.cycle() #cycle the first frame to reduce load time?
 
-    def set_detector(self, model:str="models/face_detection_yunet_2023mar.onnx", config:str="",score_threshold:float=0.9, nms_threshold:float=0.3, top_k:int=5000):
+    def set_detector(self, model:str, config:str="",score_threshold:float=0.9, nms_threshold:float=0.3, top_k:int=5000):
         input_size=(self.params.FRAME_WIDTH,self.params.FRAME_HEIGHT)
         self.detector = cv2.FaceDetectorYN.create(
             model, #path to model
@@ -68,6 +71,20 @@ class Client:
 
     def get_face_crops(self, img, locations):
         return [img[y:y+h, x:x+w] for (x,y,w,h) in locations]
+
+    def detect_faces(self, img):
+        faces = self.detector.detect(img)[1]
+        if faces is not None:
+            ret = []
+            for i,face in enumerate(faces):
+                ret.append((int(face[0]),int(face[1]),int(face[2]),int(face[3])))#x,y,w,h
+            return ret
+        else:
+            return None
+
+    def crop_face(self, img, location):
+        (x,y,w,h) = location
+        return img[y:y+h, x:x+w]
 
     def draw_face_box(self, location, name):
         '''
@@ -100,16 +117,20 @@ facemanager = None
 client = Client()
 app = fastapi.FastAPI()
 
+@app.get("/")
+async def root():
+    return fastapi.responses.PlainTextResponse("Client is running.")
+
 @app.get("/video_feed")
-async def video_feed(request:fastapi.Request,response:fastapi.Response, width:int=640, height:int=480,fps_target:int=60,identify:bool=False,detect:bool=True):
+async def video_feed(request:fastapi.Request,response:fastapi.Response, width:int=640, height:int=480,fps_target:int=60,identify:bool=False,detect:bool=False):
     '''
-    Called to display a stream of frames from the camera. Can specify four optional URL parameters:
-        width: the desired width of the video capture (depends on what resolutions camera supports) (larger resolutions reduce framerate)
-        height: the desired height of the video capture (depends on what resolutions camera supports) (larger resolutions reduce framerate)
-        fps_target: the desired framerate for the video capture (depends on what framerates camera supports)
-        identify: should frames be sent to FaceManager and identified?
+    Called to to display a stream of frames from the camera. Can specify optional URL parameters:
+        width: the desired width of the video capture
+        height: the desired height of the video capture
+        fps_target: the desired framerate for the video capture
+        identify: should faces be detected and identified?
+        detect: should client try detect faces?
     Sample request: http://localhost:9253/video_feed?width=1280&height=720&fps_target=5&identify=true
-    Note: you must close the old tab and open a new one for each request
     '''
     if client.params.INITIALIZED: #initialize client if not already
         client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = width,height
@@ -134,27 +155,31 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                 if not has_frame:
                     continue
                 
-                if identify:
-                    data = get_face_locations_and_crops()
-                    if data is not None:
-                        #data['frame'] = cv2.imencode('.jpg', client.current_frame)[1].tolist() 
+                if identify: #if request for identifying
+                    locs = client.detect_faces(client.current_frame)
+                    crops = [client.crop_face(client.current_frame,loc) for loc in locs]
+                    send = {[{"face":face,"location":loc} for face,loc in zip(crops, zip)]}
+                    if locs is not None:
                         try:
-                            async with client.fm_client.post(url=f"{client.params.FACEMANAGER_IP}/identify_faces", json=data) as resp: #send image to face manager
+                            async with client.fm_client.post(url=f"{client.params.FACEMANAGER_IP}/identify_faces", data=cv2.imencode('.jpg', client.current_frame)[1].tobytes(), json=send) as resp: #send image to face manager
                                 if resp.status == 200:
                                     data = await resp.json() #get back data
-                                    for _,face in data.items():
-                                        client.draw_face_box(face['location'], face['name']) #draw boxes around faces
+                                    for name,location in data.items():
+                                        client.draw_face_box(location, name) #draw boxes around faces
                         except aiohttp.client_exceptions.InvalidUrlClientError: #if facemanager not launched
-                            print("FaceManager not connected")
+                            pass
                         except Exception as e:
                             print(f"Issue identifying faces: {e}")
-                        
                 elif detect:
-                    locs = client.detect_face_locations(client.current_frame)
+                    locs = client.detect_faces(client.current_frame)
                     if locs is not None:
-                        for location in locs:
-                            client.draw_face_box(location, "")
-                
+                        crops = [client.crop_face(client.current_frame,loc) for loc in locs]
+                        send = [{"face":face,"location":loc} for face,loc in zip(crops, locs)]
+                        if locs is not None:
+                            for loc in locs:
+                                client.draw_face_box(loc, "?")
+                    
+
                 img_bytes = cv2.imencode('.jpg', client.current_frame)[1].tobytes()
                 # write frame as part of multipart back to client
                 yield b'--frame\r\n' + b'Content-Type: image/jpeg\r\n\r\n' + img_bytes + b'\r\n'
