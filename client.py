@@ -1,7 +1,12 @@
 import cv2 #OpenCV, computer vision library. TODO CPU ONLY!
+<<<<<<< HEAD
 import re #regex, for input validation
 
 from subprocess import Popen #for invoking facemanager
+=======
+import ttsmanager
+import facemanager
+>>>>>>> origin/Test_Patrick
 
 #TODO WebUI
 import fastapi
