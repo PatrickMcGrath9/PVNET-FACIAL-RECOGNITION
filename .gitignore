@@ -177,3 +177,8 @@ cython_debug/
 .pypirc
 *.onnx
 /.idea
+
+#Custom files related to project
+DB/
+models/*
+!models/README.md

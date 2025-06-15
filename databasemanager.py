@@ -55,53 +55,151 @@
 # if __name__ == "__main__":
 #     uvicorn.run(app)
 
-
 import os
 import json
 import cv2
-import numpy as np
+import numpy
+import fastapi
+import asyncio
+import uvicorn
+import time
 
 class DatabaseManager:
     def __init__(self, faces_dir="DB/faces", id_to_label_path="DB/id_to_label.json"):
         self.faces_dir = faces_dir
         self.id_to_label_path = id_to_label_path
 
-        os.makedirs(self.faces_dir, exist_ok=True)
-        os.makedirs(os.path.dirname(self.id_to_label_path), exist_ok=True)
+        self.id_to_label = {}
+        self.id_to_encoding = {}
+        self.read_labels()
+        self.read_encodings()        
+        self.last_update_timestamp = time.time()
 
-        self._create_id_to_label_file()
+        
 
-    def _create_id_to_label_file(self):
+    def read_labels(self):
         if not os.path.exists(self.id_to_label_path):
+            self.id_to_label = {}
             with open(self.id_to_label_path, "w") as f:
-                json.dump({}, f, indent=2)
+                json.dump({},f)
+        else:
+            with open(self.id_to_label_path, "r") as f:
+                self.id_to_label = json.load(f)
 
-    def load_all_faces(self):
-        faces_encodings = {}
+    def read_encodings(self):
+        if not os.path.exists(self.faces_dir):
+            os.makedirs(self.faces_dir, exist_ok=True)
 
-        for folder in os.listdir(self.faces_dir):
-            folder_path = os.path.join(self.faces_dir, folder)
-            if not os.path.isdir(folder_path):
+        for id in os.listdir(self.faces_dir):
+            path = os.path.join(self.faces_dir, id)
+            if not os.path.isdir(path):
+                continue
+            
+            encoding_json = os.path.join(path, "encoding.json")
+            if not os.path.exists(encoding_json):
                 continue
 
-            json_path = os.path.join(folder_path, "encoding.json")
-            if not os.path.exists(json_path):
-                print(f"Warning: Missing encoding file in {folder_path}, skipping")
-                continue
+            with open(encoding_json, "r") as f:
+                if id.startswith("!_"):
+                    id = id[2:]
+                self.id_to_encoding[id] = json.load(f)
 
-            with open(json_path, "r") as f:
-                enc_list = json.load(f)
-                faces_encodings[folder] = [np.array(e) for e in enc_list]
+    def save_new_unknown(self, id, cropped_face_image, encoding):
+        self.id_to_encoding[id] = encoding
+        self.id_to_label[id] = "?"
 
-        return faces_encodings
-
-    def save_new_unknown(self, folder, cropped_face_image, encoding):
-        folder_path = os.path.join(self.faces_dir, folder)
+        folder_path = os.path.join(self.faces_dir, "!_"+id)
         os.makedirs(folder_path, exist_ok=True)
 
-        img_path = os.path.join(folder_path, f"{folder}.jpg")
+        # onlyfiles = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and os.path.join(folder_path, f).endswith(".jpg")]
+        # for each in onlyfiles:
+        #     print(each)
+
+        lastindex = ""
+        folder_path = os.path.join(self.faces_dir, "!_"+id)
+        onlyjpgs = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and f.endswith(".jpg")]
+        if len(onlyjpgs) > 0:
+            onlyjpgs.sort()
+            lastindex = ''.join(char for char in onlyjpgs[-1] if char.isdigit())
+
+        img_path = os.path.join(folder_path, f"face{lastindex}.jpg")
         cv2.imwrite(img_path, cropped_face_image)
 
         json_path = os.path.join(folder_path, "encoding.json")
         with open(json_path, "w") as f:
-            json.dump([encoding.tolist()], f, indent=2)
+            json.dump([encoding], f, indent=2)
+
+        with open(self.id_to_label_path, "w") as f:
+            json.dump(self.id_to_label, f)
+
+        self.last_update_timestamp = time.time()
+
+global database
+database = DatabaseManager()
+app = fastapi.FastAPI()
+
+@app.get("/")
+async def root():
+    return fastapi.responses.PlainTextResponse("DatabaseManager is running.")
+
+@app.get("/identities")
+async def get_identities(request:fastapi.Request):
+    data = await request.json()
+    if data["timestamp"] != database.last_update_timestamp:
+        return fastapi.responses.JSONResponse({"encodings":database.id_to_encoding,"labels":database.id_to_label,"timestamp":database.last_update_timestamp})
+    else:
+        return fastapi.responses.Response(status_code=204)
+
+@app.patch("/identities")
+async def add_identity(request:fastapi.Request):
+    data = await request.json()
+    database.save_new_unknown(data["id"], numpy.array(data["face"], dtype='uint8'), data["encoding"])
+    database.last_update_timestamp = time.time()
+    return fastapi.responses.PlainTextResponse("Added identity")
+
+@app.get("/database_setup")
+async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:str="",port:str=""):
+    '''
+    Called to setup the database, can accept two optional URL parameters:
+        ip: the IP of a remote FaceManager that is already launched
+        port: the port that the FaceManager is accepting requests to
+    '''
+    if ip == "": #if no IP specified
+        try:
+            database = Popen(['python', 'databasemanager.py'])
+        except Exception as e:
+            return fastapi.responses.PlainTextResponse(f"There was an issue with launching database locally:{e}", status_code=400)
+        ip = "127.0.0.1" #set IP to localhost
+        port = 9255
+    else:
+        try:
+            pattern = r"^((?:\d{1,3}\.){3}\d{1,3}):(\d{1,5})$"  # used to find ip and port
+            ip_port = re.match(pattern, f"{ip}:{port}") #search for it
+            if ip_port is None: #if there is no match
+                print(f"{ip}:{port} not valid")
+                raise Exception("IP is invalid")
+        except:
+            return fastapi.responses.PlainTextResponse("IP & Port Invalid",status_code=400)
+    url = f"http://{ip}:{port}"
+    start = time.time()
+    timeout = 300
+    try:
+        while time.time() < start + timeout: #keep trying to connect until the connection is timed out
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            start = -1
+                            facemanager.params.DATABASE_IP = url
+            except Exception as e:
+                pass
+        if start != -1:
+            raise Exception("Connection timed out")
+    except Exception as e:
+        response.status_code = 400
+        return fastapi.responses.PlainTextResponse(f"There was an issue connecting to database:{e}")
+    client.db_client = aiohttp.ClientSession()
+    return fastapi.responses.PlainTextResponse("Database Connected")
+
+if __name__ == "__main__":
+    uvicorn.run(app, port=9255)

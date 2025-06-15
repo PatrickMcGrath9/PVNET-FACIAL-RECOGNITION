@@ -3,38 +3,35 @@ import gzip #for compression
 import cv2 #for facial recognition
 import numpy
 import aiohttp #for creating a client to talk to DB
+from subprocess import Popen #for invoking databasemanager
+import time
 
 import asyncio
 import fastapi
 import uvicorn
 from numpy import float32
 
-import numpy as np
-import face_recognition
 import uuid
-
-class FaceManager:
-    class Face:
-        def __init__(self, name, location):
-            self.name = name
-            self.location = location
 
 class FaceManager: #TODO make singleton
     class params:
         FRAME_SCALE_FACTOR = 0.75  # Scale down for faster processing
-        ENCODING_MATCH_TOLERANCE = 20.0 #how far apart should encodings be to qualify as matches
+        ENCODING_MATCH_TOLERANCE = 27.0 #how far apart should encodings be to qualify as matches
+        DATABASE_IP = ""
     
     def __init__(self):
-        self.db_encodings = None
-        self.db_labels = None
+        self.db_client = None
+        self.db_encodings = {}
+        self.db_labels = {}
+        self.last_update_timestamp = None
         self.set_identifier() #initialize face identifier model
     
     def __del__(self):
         if self.db_client is not None:
             self.db_client.close()
     
-    def set_identifier(self, model:str):
-        if model is None:
+    def set_identifier(self, model:str=""):
+        if model == "":
             with open("config.json") as cfg:
                 model = json.load(cfg)["identifier_model_path"]
         self.embed_net = cv2.dnn.readNetFromONNX(model) #load recognition model
@@ -57,25 +54,23 @@ class FaceManager: #TODO make singleton
         '''
         Identify face from crop by extracting embeddings. Returns a Face object of who was identified.
         '''
+        if face_crop is None or face_crop.size == 0:
+            raise ValueError("Empty face crop")
+
         blob = cv2.dnn.blobFromImage(image=face_crop, size=(112,112), swapRB=True) # turn image into 'blob' for DNN input#, scalefactor=self.params.FRAME_SCALE_FACTOR
         self.embed_net.setInput(blob) #set the input
         embedding = self.embed_net.forward() #get embedding        
-
-        #TODO: REPLACE !!! instead of calling db at time of needing encodings, refresh local copy of encodings periodically or whenever DB has new encodings
-        encodings = None
-        async with facemanager.db_client.get(url=f"{facemanager.params.DATABASE_IP}/encodings") as resp:
-            if resp.status == 200:
-                encodings = await resp.json() #get list of all ids and their encodings
         
         match = -1
 
-        for id,encoding in self.encodings.items(): #for every existing embeedding
+        for id,encoding in self.db_encodings.items(): #for every existing embeedding
             dist = numpy.linalg.norm(embedding-numpy.array(encoding, dtype=float32)) #calculate distance between that embedding and the current
+            print(dist)
             if dist < FaceManager.params.ENCODING_MATCH_TOLERANCE: #if below some tolerance
                 match = id #found!
                 break
         if match == -1: #if no match is found
-            return None
+            return (None,embedding)
         else:
             #TODO match found, update DB recent faces
             return match
@@ -90,18 +85,39 @@ app = fastapi.FastAPI()
 async def root():
     return fastapi.responses.PlainTextResponse("FaceManager is running.")
 
+@app.post("/encodings")
+async def update_encodings(request:fastapi.Request):
+    encodings = await resp.json() #get list of all ids and their encodings
+
 @app.post("/identify_faces")
 async def identify_faces(request:fastapi.Request):
+    if face_manager.db_client is None:
+        return fastapi.responses.PlainTextResponse("Database not connected to identify people", status_code=400)
+
     data = await request.json()
+
+    async with face_manager.db_client.get(url=f"{face_manager.params.DATABASE_IP}/identities", json={"timestamp":face_manager.last_update_timestamp}) as resp:
+        if resp.status == 200:
+            identities = await resp.json()
+            face_manager.db_encodings = identities["encodings"]
+            face_manager.db_labels = identities["labels"]
+            face_manager.last_update_timestamp = identities["timestamp"]
+    
     for each in data:
         face = each["face"]
         id = face_manager.find_face(numpy.array(face, dtype='uint8'))
-        if id is None:
+        if id[0] is None:
             new_uuid = str(uuid.uuid4())
             each["id"] = new_uuid
-            face_manager.db_client.patch(url=f"{facemanager.param.DATABASE_IP}/identities", json=send)
-            continue    
-        each["label"] = self.db_labels[id]
+            each["encoding"] = id[1].tolist()
+            if face_manager.db_client is not None:
+                each["label"] = "?"
+                async with face_manager.db_client.patch(url=f"{face_manager.params.DATABASE_IP}/identities", json=each) as resp:
+                    pass
+            face_manager.db_encodings[new_uuid] = id[1].tolist()
+            face_manager.db_labels[new_uuid] = "?"
+            continue
+        each["label"] = face_manager.db_labels[id]
     return fastapi.responses.JSONResponse(data)
 
 @app.get("/database_setup")
@@ -137,7 +153,7 @@ async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:st
                     async with session.get(url) as resp:
                         if resp.status == 200:
                             start = -1
-                            facemanager.params.DATABASE_IP = url
+                            face_manager.params.DATABASE_IP = url
             except Exception as e:
                 pass
         if start != -1:
@@ -145,7 +161,12 @@ async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:st
     except Exception as e:
         response.status_code = 400
         return fastapi.responses.PlainTextResponse(f"There was an issue connecting to database:{e}")
-    client.db_client = aiohttp.ClientSession()
+    face_manager.db_client = aiohttp.ClientSession()
+    async with face_manager.db_client.get(url+"/identities", json={"timestamp":-1}) as resp:
+        data = await resp.json()
+        face_manager.db_encodings = data["encodings"]
+        face_manager.db_labels = data["labels"]
+        face_manager.last_update_timestamp = data["timestamp"]
     return fastapi.responses.PlainTextResponse("Database Connected")
 
 if __name__ == "__main__":

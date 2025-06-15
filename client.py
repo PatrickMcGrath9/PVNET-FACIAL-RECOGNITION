@@ -1,5 +1,6 @@
 import cv2 #OpenCV, computer vision library. TODO CPU ONLY!
 import re #regex, for input validation
+import json
 
 from subprocess import Popen #for invoking facemanager
 
@@ -24,8 +25,6 @@ class Client:
     def __init__(self):
         self.params.INITIALIZED = False
         self.current_frame = None
-        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
-        self.set_capture()
         self.set_detector()
         self.params.INITIALIZED = True
 
@@ -38,6 +37,7 @@ class Client:
         cv2.destroyAllWindows()
         
     def set_capture(self):
+        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.params.FRAME_WIDTH) #capture width
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.params.FRAME_HEIGHT) #capture height
         self.capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
@@ -47,8 +47,8 @@ class Client:
         self.params.FRAME_RATE_SKIP = self.params.FRAME_RATE_SKIP if self.params.FRAME_RATE_SKIP > 0 else 1 #if no skip needed, resort to 1 rather than 0
         self.cycle() #cycle the first frame to reduce load time?
 
-    def set_detector(self, model:str, config:str="",score_threshold:float=0.9, nms_threshold:float=0.3, top_k:int=5000):
-        if model is None:
+    def set_detector(self, model:str="", config:str="",score_threshold:float=0.9, nms_threshold:float=0.3, top_k:int=5000):
+        if model == "":
             with open("config.json") as cfg:
                 model = json.load(cfg)["detector_model_path"]
         
@@ -119,6 +119,10 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
         detect: should client try detect faces?
     Sample request: http://localhost:9253/video_feed?width=1280&height=720&fps_target=5&identify=true
     '''
+    if identify and client.params.FACEMANAGER_IP == "":
+        #TODO tell front end to redirect to facemanager setup page
+        return fastapi.responses.PlainTextResponse("Cannot identify, FaceManager not connected", status_code=400)
+    
     if client.params.INITIALIZED: #initialize client if not already
         client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = width,height
         client.params.FRAME_RATE_TARGET = fps_target
@@ -126,10 +130,7 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
         client.set_detector()
     else:
         return fastapi.responses.PlainTextResponse(f"Client not initialized", status_code=400)
-    if identify and client.params.FACEMANAGER_IP == "":
-        #TODO tell front end to redirect to facemanager setup page
-        return fastapi.responses.PlainTextResponse("Cannot identify, FaceManager not connected", status_code=400)
-    
+
     async def stream_mpeg():
         while True: #until something disrupts the connection
             try:
@@ -145,19 +146,21 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                     locs = client.detect_face_locations(client.current_frame)
                     if locs is not None:
                         crops = client.get_face_crops(client.current_frame,locs)
-                        send = {[{"face":face,"location":loc} for face,loc in zip(crops, zip)]}
+                        send = [{"face":face.tolist(),"location":loc} for face,loc in zip(crops, locs)]
                         try:
                             async with client.fm_client.post(url=f"{client.params.FACEMANAGER_IP}/identify_faces", json=send) as resp: 
                                 if resp.status == 200:
                                     data = await resp.json() #get back data
-                                    for each in data.items():
+                                    for each in data:
                                         location = each["location"]
                                         label = each["label"]
                                         client.draw_face_box(location, label) #draw boxes around faces
+                                elif resp.status == 400:
+                                    raise Exception("there was an error with reaching the facemanager")
                         except aiohttp.client_exceptions.InvalidUrlClientError: #if facemanager not launched
                             pass
                         except Exception as e:
-                            print(f"Issue identifying faces: {e}")
+                            raise Exception(f"Issue identifying faces: {e}")
                 elif detect:
                     locs = client.detect_face_locations(client.current_frame)
                     if locs is not None:
@@ -169,8 +172,9 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                 await asyncio.sleep(0.000000001)  #allow buffer to flush
             except Exception as e:
                 print(f"Error streaming video: {e}")
+                client.capture.release()
                 break #client probably just disconnected
-    
+
     response.headers["Content-Type"] = "multipart/x-mixed-replace; boundary=frame"
     stream = fastapi.responses.StreamingResponse(stream_mpeg(), media_type="multipart/x-mixed-replace; boundary=frame")
     return stream
