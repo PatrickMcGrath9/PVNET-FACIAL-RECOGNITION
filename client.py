@@ -1,12 +1,7 @@
 import cv2 #OpenCV, computer vision library. TODO CPU ONLY!
-<<<<<<< HEAD
 import re #regex, for input validation
 
 from subprocess import Popen #for invoking facemanager
-=======
-import ttsmanager
-import facemanager
->>>>>>> origin/Test_Patrick
 
 #TODO WebUI
 import fastapi
@@ -18,12 +13,11 @@ import time
 class Client:
     class params:
         FRAME_WIDTH = 640
-        FRAME_HEIGHT = 360
+        FRAME_HEIGHT = 480
         FRAME_RATE_SKIP = 0
         FRAME_RATE = 0
         FRAME_RATE_TARGET = 10
         FRAME_COUNTER = 0
-        RETRY_TIMEOUT = 10 #TODO used with async.timeout
         FACEMANAGER_IP = ""
         INITIALIZED = False
 
@@ -54,6 +48,10 @@ class Client:
         self.cycle() #cycle the first frame to reduce load time?
 
     def set_detector(self, model:str, config:str="",score_threshold:float=0.9, nms_threshold:float=0.3, top_k:int=5000):
+        if model is None:
+            with open("config.json") as cfg:
+                model = json.load(cfg)["detector_model_path"]
+        
         input_size=(self.params.FRAME_WIDTH,self.params.FRAME_HEIGHT)
         self.detector = cv2.FaceDetectorYN.create(
             model, #path to model
@@ -65,47 +63,30 @@ class Client:
         )
 
     def detect_face_locations(self, img):
-        faces = self.detector.detect(img)[1]
-        if faces is not None:
-            ret = []
-            for i,face in enumerate(faces):
-                ret.append((int(face[0]),int(face[1]),int(face[2]),int(face[3])))#x,y,w,h
-            return ret
+        faces = self.detector.detect(img)[1] #detect face locations
+        if faces is not None: #if there are faces
+            locations = []
+            for i,face in enumerate(faces): #convert and truncate them to xywh format
+                locations.append((int(face[0]),int(face[1]),int(face[2]),int(face[3])))
+            return locations #return list of face locations
         else:
             return None
 
     def get_face_crops(self, img, locations):
         return [img[y:y+h, x:x+w] for (x,y,w,h) in locations]
 
-    def detect_faces(self, img):
-        faces = self.detector.detect(img)[1]
-        if faces is not None:
-            ret = []
-            for i,face in enumerate(faces):
-                ret.append((int(face[0]),int(face[1]),int(face[2]),int(face[3])))#x,y,w,h
-            return ret
-        else:
-            return None
-
-    def crop_face(self, img, location):
-        (x,y,w,h) = location
-        return img[y:y+h, x:x+w]
-
-    def draw_face_box(self, location, name):
-        '''
-        Not needed since switching to WebUI which will display face crops rather than drawing box around faces
-        '''
+    def draw_face_box(self, location, label):
         (x, y, w, h) = location
         cv2.rectangle(self.current_frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
         cv2.rectangle(self.current_frame, (x, y), (x+w, y-35), (0, 0, 255), cv2.FILLED)
-        cv2.putText(self.current_frame, name, (x, y), cv2.FONT_HERSHEY_DUPLEX, 1.25, (255, 255, 255), 1, bottomLeftOrigin=False)
+        cv2.putText(self.current_frame, label, (x, y), cv2.FONT_HERSHEY_DUPLEX, 1.25, (255, 255, 255), 1, bottomLeftOrigin=False)
 
     def cycle(self):
         has_frame, frame = self.capture.read()
         if not has_frame: #if there is no frame
             return (False, self.current_frame)
 
-        if self.params.FRAME_COUNTER % self.params.FRAME_RATE_SKIP != 0:
+        if self.params.FRAME_COUNTER % self.params.FRAME_RATE_SKIP != 0: #if we need to skip the current frame
             self.params.FRAME_COUNTER += 1
             return (False, self.current_frame)
         if self.params.FRAME_COUNTER >= self.params.FRAME_RATE:
@@ -120,6 +101,7 @@ global facemanager #global reference to facemanager process (if needed)
 global client #global reference to client object
 facemanager = None
 client = Client()
+
 app = fastapi.FastAPI()
 
 @app.get("/")
@@ -143,11 +125,10 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
         client.set_capture()
         client.set_detector()
     else:
-        response.status_code = 400
-        return fastapi.responses.PlainTextResponse(f"Client not initialized")
+        return fastapi.responses.PlainTextResponse(f"Client not initialized", status_code=400)
     if identify and client.params.FACEMANAGER_IP == "":
-        response.status_code = 400
-        return fastapi.responses.PlainTextResponse("Cannot identify, FaceManager not connected")
+        #TODO tell front end to redirect to facemanager setup page
+        return fastapi.responses.PlainTextResponse("Cannot identify, FaceManager not connected", status_code=400)
     
     async def stream_mpeg():
         while True: #until something disrupts the connection
@@ -161,29 +142,26 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                     continue
                 
                 if identify: #if request for identifying
-                    locs = client.detect_faces(client.current_frame)
-                    crops = [client.crop_face(client.current_frame,loc) for loc in locs]
-                    send = {[{"face":face,"location":loc} for face,loc in zip(crops, zip)]}
+                    locs = client.detect_face_locations(client.current_frame)
                     if locs is not None:
+                        crops = client.get_face_crops(client.current_frame,locs)
+                        send = {[{"face":face,"location":loc} for face,loc in zip(crops, zip)]}
                         try:
-                            async with client.fm_client.post(url=f"{client.params.FACEMANAGER_IP}/identify_faces", data=cv2.imencode('.jpg', client.current_frame)[1].tobytes(), json=send) as resp: #send image to face manager
+                            async with client.fm_client.post(url=f"{client.params.FACEMANAGER_IP}/identify_faces", json=send) as resp: 
                                 if resp.status == 200:
                                     data = await resp.json() #get back data
-                                    for name,location in data.items():
-                                        client.draw_face_box(location, name) #draw boxes around faces
+                                    for each in data.items():
+                                        location = each["location"]
+                                        label = each["label"]
+                                        client.draw_face_box(location, label) #draw boxes around faces
                         except aiohttp.client_exceptions.InvalidUrlClientError: #if facemanager not launched
                             pass
                         except Exception as e:
                             print(f"Issue identifying faces: {e}")
                 elif detect:
-                    locs = client.detect_faces(client.current_frame)
+                    locs = client.detect_face_locations(client.current_frame)
                     if locs is not None:
-                        crops = [client.crop_face(client.current_frame,loc) for loc in locs]
-                        send = [{"face":face,"location":loc} for face,loc in zip(crops, locs)]
-                        if locs is not None:
-                            for loc in locs:
-                                client.draw_face_box(loc, "?")
-                    
+                        client.draw_face_box(loc, "?")
 
                 img_bytes = cv2.imencode('.jpg', client.current_frame)[1].tobytes()
                 # write frame as part of multipart back to client
@@ -193,24 +171,9 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                 print(f"Error streaming video: {e}")
                 break #client probably just disconnected
     
-    def get_face_locations_and_crops():
-        '''
-        Returns a dictionary of face location and crops ({location:crop}) tuples 
-        '''
-        locs = client.detect_face_locations(client.current_frame)
-        if locs is None:
-            return None
-        crops = client.get_face_crops(client.current_frame, locs)
-        return {idx:(loc,crop.tolist()) for idx,(loc,crop) in enumerate(zip(locs,crops))} 
-    
     response.headers["Content-Type"] = "multipart/x-mixed-replace; boundary=frame"
     stream = fastapi.responses.StreamingResponse(stream_mpeg(), media_type="multipart/x-mixed-replace; boundary=frame")
     return stream
-
-@app.get("/recent_faces")
-async def recent_faces(response:fastapi.Response):
-    #ask face manager for list of recent faces
-    return fastapi.responses.PlainTextResponse("Recent faces data placeholder")
 
 @app.get("/facemanager_setup")
 async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip:str="",port:str=""):
