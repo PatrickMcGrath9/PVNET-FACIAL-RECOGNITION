@@ -2,17 +2,12 @@ import tensorflow as tf
 from tensorflow.keras import layers, models
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
-<<<<<<< Updated upstream
 # ==== CONFIGURATION ====
 data_dir = 'DB/'
-=======
-# === CONFIGURATION ===
->>>>>>> Stashed changes
 IMG_SIZE = (100, 100)
 BATCH_SIZE = 16
 EPOCHS = 10
 
-<<<<<<< Updated upstream
 # ==== DATA PREPROCESSING ====
 datagen = ImageDataGenerator(rescale=1./255, validation_split=0.2)
 
@@ -33,27 +28,6 @@ val_data = datagen.flow_from_directory(
 )
 
 # ==== MODEL DEFINITION ====
-=======
-# === DATA PREPROCESSING ===
-train_datagen = ImageDataGenerator(rescale=1./255)
-val_datagen = ImageDataGenerator(rescale=1./255)
-
-train_data = train_datagen.flow_from_directory(
-    'DB/train',
-    target_size=IMG_SIZE,
-    batch_size=BATCH_SIZE,
-    class_mode='sparse'
-)
-
-val_data = val_datagen.flow_from_directory(
-    'DB/validation',
-    target_size=IMG_SIZE,
-    batch_size=BATCH_SIZE,
-    class_mode='sparse'
-)
-
-# === CNN MODEL ===
->>>>>>> Stashed changes
 model = models.Sequential([
     layers.Input(shape=(100, 100, 3)),
     layers.Conv2D(32, (3, 3), activation='relu'),
@@ -69,16 +43,9 @@ model.compile(optimizer='adam',
               loss='sparse_categorical_crossentropy',
               metrics=['accuracy'])
 
-<<<<<<< Updated upstream
 # ==== TRAINING ====
 model.fit(train_data, validation_data=val_data, epochs=EPOCHS)
 
 # ==== SAVE MODEL ====
-=======
-# === TRAIN MODEL ===
-model.fit(train_data, validation_data=val_data, epochs=EPOCHS)
-
-# === SAVE MODEL ===
->>>>>>> Stashed changes
 model.save('face_cnn_model.h5')
 
