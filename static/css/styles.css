@@ -1,0 +1,125 @@
+/* video, img {
+    border: 1px solid #333;
+    border-radius: 10px;
+    max-width: 100%;
+    height: auto;
+}
+#controls {
+    margin: 10px 0;
+}
+
+ */
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+
+h1 {
+    text-align: center;
+}
+
+#status-container p {
+    margin: 5px 0;
+    font-size: 1.1em;
+}
+
+#controls {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: 300px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+#dropdown-button {
+    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    font-size: 16px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#dropdown-button:hover {
+    background-color: #0056b3;
+}
+
+#dropdown-arrow {
+    display: inline-block;
+    transition: transform 0.3s ease;
+}
+
+#dropdown-arrow.open {
+    transform: rotate(180deg);
+}
+
+/* Dropdown container for checkboxes */
+#options-dropdown {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px 15px;
+    background-color: white;
+    margin-top: 10px;
+    min-height: 60px; /* reserve space */
+    box-sizing: border-box;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+    max-height: 200px; /* enough height to show checkboxes */
+    visibility: visible;
+    opacity: 1;
+}
+
+#options-dropdown.hidden {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin-top: 10px; /* keep margin so space remains */
+    visibility: hidden;
+    opacity: 0;
+}
+
+/* Style for checkbox labels */
+#options-dropdown label {
+    display: block;
+    font-size: 1em;
+    margin-bottom: 8px;
+}
+
+#start-btn {
+    margin-top: 10px;
+    padding: 10px 20px;
+    font-size: 16px;
+    border-radius: 5px;
+    border: none;
+    background-color: #28a745;
+    color: white;
+    cursor: pointer;
+    align-self: stretch;
+    max-width: 300px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+#start-btn:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+
+#video {
+    display: block;
+    margin: 30px auto 0;
+    max-width: 100%;
+    height: auto;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+}
+
+
+

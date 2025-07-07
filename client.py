@@ -10,6 +10,10 @@ import uvicorn
 import asyncio
 import aiohttp
 import time
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
 
 class Client:
     class params:
@@ -25,6 +29,8 @@ class Client:
     def __init__(self):
         self.params.INITIALIZED = False
         self.current_frame = None
+        self.capture = None        # Initialize capture to None to avoid attribute errors
+        self.fm_client = None      # Initialize fm_client to None
         self.set_detector()
         self.params.INITIALIZED = True
 
@@ -32,7 +38,7 @@ class Client:
         if self.capture is not None:
             self.capture.release()
         if self.fm_client is not None:
-            self.fm_client.close()
+            asyncio.create_task(self.fm_client.close())
         self.params.INITIALIZED = False
         cv2.destroyAllWindows()
         
@@ -82,6 +88,9 @@ class Client:
         cv2.putText(self.current_frame, label, (x, y), cv2.FONT_HERSHEY_DUPLEX, 1.25, (255, 255, 255), 1, bottomLeftOrigin=False)
 
     def cycle(self):
+        if self.capture is None:
+            return (False, None)
+        
         has_frame, frame = self.capture.read()
         if not has_frame: #if there is no frame
             return (False, self.current_frame)
@@ -97,6 +106,7 @@ class Client:
 
         return (True, self.current_frame)
 
+
 global facemanager #global reference to facemanager process (if needed)
 global client #global reference to client object
 facemanager = None
@@ -104,9 +114,16 @@ client = Client()
 
 app = fastapi.FastAPI()
 
+# Mount static files (for CSS, JS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Setup Jinja2 templates folder
+templates = Jinja2Templates(directory="templates")
+
 @app.get("/")
-async def root():
-    return fastapi.responses.PlainTextResponse("Client is running.")
+async def root(request: Request):
+    # Serve the HTML UI from template file, passing request for Jinja2
+    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/video_feed")
 async def video_feed(request:fastapi.Request,response:fastapi.Response, width:int=640, height:int=480,fps_target:int=60,identify:bool=False,detect:bool=False):
@@ -164,7 +181,8 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                 elif detect:
                     locs = client.detect_face_locations(client.current_frame)
                     if locs is not None:
-                        client.draw_face_box(loc, "?")
+                        for loc in locs:
+                            client.draw_face_box(loc, "?")
 
                 img_bytes = cv2.imencode('.jpg', client.current_frame)[1].tobytes()
                 # write frame as part of multipart back to client
@@ -172,7 +190,8 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                 await asyncio.sleep(0.000000001)  #allow buffer to flush
             except Exception as e:
                 print(f"Error streaming video: {e}")
-                client.capture.release()
+                if client.capture is not None:
+                    client.capture.release()
                 break #client probably just disconnected
 
     response.headers["Content-Type"] = "multipart/x-mixed-replace; boundary=frame"
@@ -188,12 +207,14 @@ async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip
     Sample Request: http://localhost:9253/facemanager_setup
     Note: Remote FaceManager has not been tested yet
     '''
-    if ip == "": #if no IP specified
+    global facemanager
+    if ip == "":
         try:
-            facemanager = Popen(['python', 'facemanager.py']) #run the facemanager
+            facemanager = Popen(['python', 'facemanager.py'])
         except Exception as e:
-            return fastapi.responses.PlainTextResponse(f"There was an issue with launching FaceManager locally:{e}", status_code=400)
-        ip = "127.0.0.1" #set IP to localhost
+            return fastapi.responses.PlainTextResponse(
+                f"There was an issue with launching FaceManager locally:{e}", status_code=400)
+        ip = "127.0.0.1"
         port = 9254
     else:
         try:
@@ -225,5 +246,29 @@ async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip
     client.fm_client = aiohttp.ClientSession()
     return fastapi.responses.PlainTextResponse("Facemanager Connected")
 
+@app.get("/database_setup")
+async def database_setup(request: fastapi.Request, response: fastapi.Response):
+    '''
+    Called to setup the DatabaseManager through the connected FaceManager.
+    Assumes FaceManager is already running and available.
+    '''
+    if client.params.FACEMANAGER_IP == "":
+        return fastapi.responses.PlainTextResponse("FaceManager not connected yet", status_code=400)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{client.params.FACEMANAGER_IP}/database_setup") as resp:
+                if resp.status == 200:
+                    return fastapi.responses.PlainTextResponse("DatabaseManager Connected", status_code=200)
+                else:
+                    return fastapi.responses.PlainTextResponse(f"DatabaseManager setup failed: {await resp.text()}", status_code=resp.status)
+    except Exception as e:
+        return fastapi.responses.PlainTextResponse(f"Exception occurred while connecting to DatabaseManager: {e}", status_code=400)
+
 if __name__ == "__main__":      
     uvicorn.run(app, port=9253)
+
+
+# Don't redirect, make a GET request
+# Use javascript (fetch)
+# Have image tag point to video feed endpoint
