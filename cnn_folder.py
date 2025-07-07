@@ -3,7 +3,7 @@ from tensorflow.keras import layers, models
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 # ==== CONFIGURATION ====
-data_dir = 'DB/'
+data_dir = 'Celebrity Faces Dataset'
 IMG_SIZE = (100, 100)
 BATCH_SIZE = 16
 EPOCHS = 10
