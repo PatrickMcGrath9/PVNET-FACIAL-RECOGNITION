@@ -10,6 +10,7 @@ import uvicorn
 import asyncio
 import aiohttp
 import time
+import base64
 
 class Client:
     class params:
@@ -26,16 +27,45 @@ class Client:
         self.params.INITIALIZED = False
         self.current_frame = None
         self.set_detector()
+        self.supported = self.get_supported()
         self.params.INITIALIZED = True
 
     def __del__(self):
-        if self.capture is not None:
+        if hasattr(self, "capture"):
             self.capture.release()
-        if self.fm_client is not None:
+        if hasattr(self, "fm_client"):
             self.fm_client.close()
         self.params.INITIALIZED = False
         cv2.destroyAllWindows()
-        
+
+    def get_supported(self):
+        supported = {"resolutions":[],"framerate":[]}
+        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1000000) #capture width
+        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000000) #capture height
+        start_w = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        start_h = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        for width in range(start_w, 0, -100):
+            for height in range(start_h, 0, -100):
+                self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width) #capture width
+                self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height) #capture height
+                temp_w = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+                temp_h = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                width = temp_w if temp_w < width else width
+                height = temp_h if temp_h < height else height
+
+                if {"width":temp_w,"height":temp_h} not in supported["resolutions"]:
+                    supported["resolutions"].append({"width":temp_w,"height":temp_h})
+
+        self.capture.set(cv2.CAP_PROP_FPS, self.params.FRAME_RATE_TARGET) #try and set target FPS
+        max_framerate = int(self.capture.get(cv2.CAP_PROP_FPS)) #retrieve actual FPS
+        supported["framerate"] = max_framerate
+
+        self.capture.release()
+        return supported
+
     def set_capture(self):
         self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.params.FRAME_WIDTH) #capture width
@@ -74,6 +104,12 @@ class Client:
 
     def get_face_crops(self, img, locations):
         return [img[y:y+h, x:x+w] for (x,y,w,h) in locations]
+
+    def raw_crops_to_webp(self, crops, quality=85):
+        return [cv2.imencode('.webp', crop, [cv2.IMWRITE_WEBP_QUALITY, quality])[1] for crop in crops]
+    
+    def images_to_b64str(self, imgs):
+        return [base64.b64encode(img).decode('utf-8') for img in imgs]
 
     def draw_face_box(self, location, label):
         (x, y, w, h) = location
@@ -132,8 +168,8 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
         return fastapi.responses.PlainTextResponse(f"Client not initialized", status_code=400)
 
     async def stream_mpeg():
-        while True: #until something disrupts the connection
-            try:
+        try:
+            while True:
                 if await request.is_disconnected():
                     raise Exception("Client disconnected")
 
@@ -146,7 +182,11 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                     locs = client.detect_face_locations(client.current_frame)
                     if locs is not None:
                         crops = client.get_face_crops(client.current_frame,locs)
-                        send = [{"face":face.tolist(),"location":loc} for face,loc in zip(crops, locs)]
+                        webps = client.raw_crops_to_webp(crops)
+                        b64strs = client.images_to_b64str(webps)
+                        send = [{"face":face,"location":loc} for face,loc in zip(b64strs, locs)]
+                        send_size = len(json.dumps(send).encode('utf-8'))
+                        print("Client Send:",send_size/1024/1024)
                         try:
                             async with client.fm_client.post(url=f"{client.params.FACEMANAGER_IP}/identify_faces", json=send) as resp: 
                                 if resp.status == 200:
@@ -164,20 +204,25 @@ async def video_feed(request:fastapi.Request,response:fastapi.Response, width:in
                 elif detect:
                     locs = client.detect_face_locations(client.current_frame)
                     if locs is not None:
-                        client.draw_face_box(loc, "?")
+                        for loc in locs:
+                            client.draw_face_box(loc, "?")
 
                 img_bytes = cv2.imencode('.jpg', client.current_frame)[1].tobytes()
                 # write frame as part of multipart back to client
                 yield b'--frame\r\n' + b'Content-Type: image/jpeg\r\n\r\n' + img_bytes + b'\r\n'
                 await asyncio.sleep(0.000000001)  #allow buffer to flush
-            except Exception as e:
-                print(f"Error streaming video: {e}")
-                client.capture.release()
-                break #client probably just disconnected
+        except Exception as e:
+            print(f"Error streaming video: {e}")
+        finally:
+            client.capture.release()
 
     response.headers["Content-Type"] = "multipart/x-mixed-replace; boundary=frame"
     stream = fastapi.responses.StreamingResponse(stream_mpeg(), media_type="multipart/x-mixed-replace; boundary=frame")
     return stream
+
+@app.get("/supported")
+async def get_supported():
+    return client.supported
 
 @app.get("/facemanager_setup")
 async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip:str="",port:str=""):

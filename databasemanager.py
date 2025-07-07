@@ -80,6 +80,8 @@ class DatabaseManager:
     def read_labels(self):
         if not os.path.exists(self.id_to_label_path):
             self.id_to_label = {}
+            if not os.path.exists("DB"):
+                os.makedirs("DB")
             with open(self.id_to_label_path, "w") as f:
                 json.dump({},f)
         else:

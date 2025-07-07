@@ -10,6 +10,7 @@ import asyncio
 import fastapi
 import uvicorn
 from numpy import float32
+import base64
 
 import uuid
 
@@ -65,7 +66,6 @@ class FaceManager: #TODO make singleton
 
         for id,encoding in self.db_encodings.items(): #for every existing embeedding
             dist = numpy.linalg.norm(embedding-numpy.array(encoding, dtype=float32)) #calculate distance between that embedding and the current
-            print(dist)
             if dist < FaceManager.params.ENCODING_MATCH_TOLERANCE: #if below some tolerance
                 match = id #found!
                 break
@@ -95,6 +95,8 @@ async def identify_faces(request:fastapi.Request):
         return fastapi.responses.PlainTextResponse("Database not connected to identify people", status_code=400)
 
     data = await request.json()
+    send_size = len(json.dumps(data).encode('utf-8'))
+    print("FM Receive:",send_size/1024/1024)
 
     async with face_manager.db_client.get(url=f"{face_manager.params.DATABASE_IP}/identities", json={"timestamp":face_manager.last_update_timestamp}) as resp:
         if resp.status == 200:
@@ -104,8 +106,12 @@ async def identify_faces(request:fastapi.Request):
             face_manager.last_update_timestamp = identities["timestamp"]
     
     for each in data:
-        face = each["face"]
-        id = face_manager.find_face(numpy.array(face, dtype='uint8'))
+        face_b64 = each["face"]
+        face_webp = base64.b64decode(face_b64)
+        face_arr = numpy.frombuffer(face_webp, numpy.uint8)
+        face = cv2.imdecode(face_arr, cv2.IMREAD_COLOR)
+
+        id = face_manager.find_face(face)
         if id[0] is None:
             new_uuid = str(uuid.uuid4())
             each["id"] = new_uuid
