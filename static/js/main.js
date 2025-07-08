@@ -1,165 +1,8 @@
-// const facemanagerStatus = document.getElementById("facemanager-status");
-// const databasemanagerStatus = document.getElementById("databasemanager-status");
-// const startBtn = document.getElementById("start-btn");
-// const video = document.getElementById("video");
-
-// const detectCheckbox = document.getElementById("detect");
-// const identifyCheckbox = document.getElementById("identify");
-
-// let facemanagerConnected = false;
-// let databasemanagerConnected = false;
-
-// async function connectFaceManager() {
-//     facemanagerStatus.textContent = "Connecting...";
-//     try {
-//         const resp = await fetch('/facemanager_setup');
-//         const text = await resp.text();
-//         if (resp.ok) {
-//             facemanagerStatus.textContent = "✅ " + text;
-//             facemanagerConnected = true;
-//         } else {
-//             facemanagerStatus.textContent = "❌ " + text;
-//             facemanagerConnected = false;
-//         }
-//     } catch (err) {
-//         facemanagerStatus.textContent = "❌ Failed: " + err.message;
-//         facemanagerConnected = false;
-//     }
-// }
-
-// async function connectDatabaseManager() {
-//     databasemanagerStatus.textContent = "Connecting...";
-//     try {
-//         const resp = await fetch('/database_setup');
-//         const text = await resp.text();
-//         if (resp.ok) {
-//             databasemanagerStatus.textContent = "✅ " + text;
-//             databasemanagerConnected = true;
-//         } else {
-//             databasemanagerStatus.textContent = "❌ " + text;
-//             databasemanagerConnected = false;
-//         }
-//     } catch (err) {
-//         databasemanagerStatus.textContent = "❌ Failed: " + err.message;
-//         databasemanagerConnected = false;
-//     }
-// }
-
-// function checkStartEnable() {
-//     if (facemanagerConnected && databasemanagerConnected) {
-//         startBtn.disabled = false;
-//         facemanagerStatus.textContent += " (Ready)";
-//         databasemanagerStatus.textContent += " (Ready)";
-//     } else {
-//         startBtn.disabled = true;
-//     }
-// }
-
-// async function init() {
-//     await connectFaceManager();
-//     if (facemanagerConnected) {
-//         await connectDatabaseManager();
-//     }
-//     checkStartEnable();
-// }
-
-// startBtn.addEventListener('click', () => {
-//     const detect = detectCheckbox.checked;
-//     const identify = identifyCheckbox.checked;
-//     video.src = `/video_feed?detect=${detect}&identify=${identify}&fps_target=30`;
-// });
-
-
-// window.onload = init;
-
-
-// const facemanagerStatus = document.getElementById("facemanager-status");
-// const databasemanagerStatus = document.getElementById("databasemanager-status");
-// const startBtn = document.getElementById("start-btn");
-// const video = document.getElementById("video");
-
-// const detectCheckbox = document.getElementById("detect");
-// const identifyCheckbox = document.getElementById("identify");
-
-// const toggleOptionsBtn = document.getElementById("toggle-options");
-// const optionsDropdown = document.getElementById("options-dropdown");
-
-// let facemanagerConnected = false;
-// let databasemanagerConnected = false;
-
-// // Toggle dropdown visibility
-// toggleOptionsBtn.addEventListener("click", () => {
-//     const isVisible = optionsDropdown.style.display === "block";
-//     optionsDropdown.style.display = isVisible ? "none" : "block";
-//     toggleOptionsBtn.textContent = isVisible ? "Options ▼" : "Options ▲";
-// });
-
-// async function connectFaceManager() {
-//     facemanagerStatus.textContent = "Connecting...";
-//     try {
-//         const resp = await fetch('/facemanager_setup');
-//         const text = await resp.text();
-//         if (resp.ok) {
-//             facemanagerStatus.textContent = "✅ " + text;
-//             facemanagerConnected = true;
-//         } else {
-//             facemanagerStatus.textContent = "❌ " + text;
-//             facemanagerConnected = false;
-//         }
-//     } catch (err) {
-//         facemanagerStatus.textContent = "❌ Failed: " + err.message;
-//         facemanagerConnected = false;
-//     }
-// }
-
-// async function connectDatabaseManager() {
-//     databasemanagerStatus.textContent = "Connecting...";
-//     try {
-//         const resp = await fetch('/database_setup');
-//         const text = await resp.text();
-//         if (resp.ok) {
-//             databasemanagerStatus.textContent = "✅ " + text;
-//             databasemanagerConnected = true;
-//         } else {
-//             databasemanagerStatus.textContent = "❌ " + text;
-//             databasemanagerConnected = false;
-//         }
-//     } catch (err) {
-//         databasemanagerStatus.textContent = "❌ Failed: " + err.message;
-//         databasemanagerConnected = false;
-//     }
-// }
-
-// function checkStartEnable() {
-//     if (facemanagerConnected && databasemanagerConnected) {
-//         startBtn.disabled = false;
-//         facemanagerStatus.textContent += " (Ready)";
-//         databasemanagerStatus.textContent += " (Ready)";
-//     } else {
-//         startBtn.disabled = true;
-//     }
-// }
-
-// async function init() {
-//     await connectFaceManager();
-//     if (facemanagerConnected) {
-//         await connectDatabaseManager();
-//     }
-//     checkStartEnable();
-// }
-
-// startBtn.addEventListener('click', () => {
-//     const detect = detectCheckbox.checked;
-//     const identify = identifyCheckbox.checked;
-//     video.src = `/video_feed?detect=${detect}&identify=${identify}&fps_target=30`;
-// });
-
-// window.onload = init;
-
-
 const facemanagerStatus = document.getElementById("facemanager-status");
 const databasemanagerStatus = document.getElementById("databasemanager-status");
 const startBtn = document.getElementById("start-btn");
+const videoBtn = document.getElementById("video-btn");
+const resolutionSelect = document.getElementById("resolution-select");
 const video = document.getElementById("video");
 
 const detectCheckbox = document.getElementById("detect");
@@ -170,13 +13,31 @@ const optionsDropdown = document.getElementById("options-dropdown");
 
 let facemanagerConnected = false;
 let databasemanagerConnected = false;
+let streaming = false;
+let lastUsedSource = ""; // track last type used
 
 // Toggle dropdown options visibility
 toggleOptionsBtn.addEventListener("click", () => {
-    const isVisible = optionsDropdown.style.display === "block";
-    optionsDropdown.style.display = isVisible ? "none" : "block";
-    toggleOptionsBtn.textContent = isVisible ? "Options ▼" : "Options ▲";
+    optionsDropdown.classList.toggle("hidden");
+    toggleOptionsBtn.textContent = optionsDropdown.classList.contains("hidden") ? "Options ▼" : "Options ▲";
 });
+
+// Load available resolutions
+async function loadResolutions() {
+    try {
+        const res = await fetch("/supported");
+        const data = await res.json();
+
+        data.resolutions.forEach(({ width, height }) => {
+            const option = document.createElement("option");
+            option.value = `${width}x${height}`;
+            option.textContent = `${width} x ${height}`;
+            resolutionSelect.appendChild(option);
+        });
+    } catch (err) {
+        console.error("Error loading resolutions:", err);
+    }
+}
 
 // Connect FaceManager
 async function connectFaceManager() {
@@ -218,38 +79,106 @@ async function connectDatabaseManager() {
 
 // Enable Start button only if both managers connected
 function checkStartEnable() {
-    if (facemanagerConnected && databasemanagerConnected) {
-        startBtn.disabled = false;
-        if (!facemanagerStatus.textContent.includes("(Ready)")) {
-          facemanagerStatus.textContent += " (Ready)";
-        }
-        if (!databasemanagerStatus.textContent.includes("(Ready)")) {
-          databasemanagerStatus.textContent += " (Ready)";
-        }
+    startBtn.disabled = !(facemanagerConnected && databasemanagerConnected);
+}
+
+// Unified toggle stream handler
+function toggleStream(url, source) {
+    if (!streaming || lastUsedSource !== source) {
+        video.src = url;
+        startBtn.textContent = "Stop";
+        streaming = true;
+        lastUsedSource = source;
     } else {
-        startBtn.disabled = true;
+        video.src = "";
+        startBtn.textContent = "Start";
+        streaming = false;
+        lastUsedSource = "";
     }
 }
 
-// Initialize connections
+// Start/Stop with detect/identify
+startBtn.addEventListener('click', () => {
+    const detect = detectCheckbox.checked;
+    const identify = identifyCheckbox.checked;
+    const [width, height] = resolutionSelect.value.split('x');
+    const url = `/video_feed?detect=${detect}&identify=${identify}&width=${width}&height=${height}&fps_target=30`;
+    toggleStream(url, "start");
+});
+
+// Raw video feed
+videoBtn.addEventListener('click', () => {
+    const [width, height] = resolutionSelect.value.split('x');
+    const url = `/video_feed?detect=false&identify=false&width=${width}&height=${height}&fps_target=30`;
+    toggleStream(url, "video");
+});
+
+// Stop the stream completely
+function stopStream() {
+    video.src = "";
+    startBtn.textContent = "Start";
+    streaming = false;
+    lastUsedSource = "";
+}
+
+// Start the stream with current settings and resolution
+function startStreamWithCurrentSettings() {
+    const [width, height] = resolutionSelect.value.split('x');
+    let url = "";
+    if (lastUsedSource === "start") {
+        const detect = detectCheckbox.checked;
+        const identify = identifyCheckbox.checked;
+        url = `/video_feed?detect=${detect}&identify=${identify}&width=${width}&height=${height}&fps_target=30`;
+    } else if (lastUsedSource === "video") {
+        url = `/video_feed?detect=false&identify=false&width=${width}&height=${height}&fps_target=30`;
+    }
+    video.src = url;
+    startBtn.textContent = "Stop";
+    streaming = true;
+}
+
+// Restart the stream on resolution change
+// Auto update stream when resolution changes, only if streaming
+resolutionSelect.addEventListener("change", async () => {
+    if (!streaming || !lastUsedSource) return;
+
+    // Stop stream
+    video.src = "";
+    streaming = false;
+    startBtn.textContent = "Start";
+
+    // Wait briefly to allow clean disconnect
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Reconstruct URL
+    const [width, height] = resolutionSelect.value.split('x');
+    let url = "";
+
+    if (lastUsedSource === "start") {
+        const detect = detectCheckbox.checked;
+        const identify = identifyCheckbox.checked;
+        url = `/video_feed?detect=${detect}&identify=${identify}&width=${width}&height=${height}&fps_target=30`;
+    } else if (lastUsedSource === "video") {
+        url = `/video_feed?detect=false&identify=false&width=${width}&height=${height}&fps_target=30`;
+    }
+
+    // Restart stream
+    video.src = url;
+    streaming = true;
+    startBtn.textContent = "Stop";
+});
+
+
+
 async function init() {
+    await loadResolutions();
     await connectFaceManager();
     if (facemanagerConnected) {
         await connectDatabaseManager();
     }
     checkStartEnable();
+    optionsDropdown.classList.add("hidden");
+    toggleOptionsBtn.textContent = "Options ▼";
 }
 
-// Start streaming video with selected options
-startBtn.addEventListener('click', () => {
-    const detect = detectCheckbox.checked;
-    const identify = identifyCheckbox.checked;
-    video.src = `/video_feed?detect=${detect}&identify=${identify}&fps_target=30`;
-});
-
 window.onload = init;
-
-// Initially hide dropdown options
-optionsDropdown.style.display = "none";
-toggleOptionsBtn.textContent = "Options ▼";
-

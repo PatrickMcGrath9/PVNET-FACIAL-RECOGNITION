@@ -43,6 +43,10 @@ class Client:
         cv2.destroyAllWindows()
 
     def get_supported(self):
+        # #FOR TESTING ONLY
+        # return {"resolutions":[{"width":1280,"height":720},{"width":960,"height":540},{"width":848,"height":480},{"width":640,"height":360},{"width":424,"height":240},{"width":320,"height":180},{"width":640,"height":480},{"width":352,"height":288},{"width":320,"height":240}],"framerate":30}
+        # #FOR TESTING ONLY
+
         supported = {"resolutions":[],"framerate":[]}
         self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1000000) #capture width
