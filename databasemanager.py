@@ -73,7 +73,8 @@ class DatabaseManager:
         self.id_to_encoding = {}
         self.read_labels()
         self.read_encodings()        
-        self.last_update_timestamp = time.time()
+        self.db_update_event = asyncio.Event()
+        self.db_update_event.set()
 
         
 
@@ -144,13 +145,40 @@ app = fastapi.FastAPI()
 async def root():
     return fastapi.responses.PlainTextResponse("DatabaseManager is running.")
 
-@app.get("/identities")
-async def get_identities(request:fastapi.Request):
-    data = await request.json()
-    if data["timestamp"] != database.last_update_timestamp:
-        return fastapi.responses.JSONResponse({"encodings":database.id_to_encoding,"labels":database.id_to_label,"timestamp":database.last_update_timestamp})
-    else:
-        return fastapi.responses.Response(status_code=204)
+    @app.get("/identities")
+    async def get_identities(request:fastapi.Request):
+        data = await request.json()
+        if data["timestamp"] != database.last_update_timestamp:
+            return fastapi.responses.JSONResponse({"encodings":database.id_to_encoding,"labels":database.id_to_label,"timestamp":database.last_update_timestamp})
+        else:
+            return fastapi.responses.Response(status_code=204)
+
+@app.websocket("/ws/identities")
+async def identities(websocket: fastapi.WebSocket):
+    await websocket.accept()
+
+    async def receiver():
+        while True:
+            data = json.loads(await websocket.receive_text())
+            image_b64 = base64.b64decode(data["face"])
+            image_arr = numpy.frombuffer(image_b64, numpy.uint8)
+            image = cv2.imdecode(image_arr, cv2.IMREAD_COLOR)
+            database.save_new_unknown(data["id"], image, data["encoding"])
+            database.db_update_event.set()
+    async def sender():
+        while True:
+            await database.db_update_event.wait()
+            await websocket.send_text(json.dumps({"encodings":database.id_to_encoding, "labels":database.id_to_label}))
+            database.db_update_event.clear()
+    try:
+        await asyncio.gather(receiver(), sender())
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        await websocket.close()
+        print("Client disconnected.")
+            
+            
 
 @app.patch("/identities")
 async def add_identity(request:fastapi.Request):
@@ -204,4 +232,4 @@ async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:st
     return fastapi.responses.PlainTextResponse("Database Connected")
 
 if __name__ == "__main__":
-    uvicorn.run(app, port=9255)
+    uvicorn.run(app, host="0.0.0.0", port=9255)

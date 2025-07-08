@@ -10,27 +10,30 @@ import asyncio
 import fastapi
 import uvicorn
 from numpy import float32
-import base64
 
 import uuid
+import websockets
 
 class FaceManager: #TODO make singleton
     class params:
         FRAME_SCALE_FACTOR = 0.75  # Scale down for faster processing
         ENCODING_MATCH_TOLERANCE = 27.0 #how far apart should encodings be to qualify as matches
-        DATABASE_IP = ""
+        DB_IP = ""
     
     def __init__(self):
-        self.db_client = None
         self.db_encodings = {}
         self.db_labels = {}
-        self.last_update_timestamp = None
+        self.update_queue = asyncio.Queue()
         self.set_identifier() #initialize face identifier model
     
     def __del__(self):
-        if self.db_client is not None:
+        if hasattr(self, "db_client"):
             self.db_client.close()
     
+    @staticmethod
+    def decode_image(image):
+        return cv2.imdecode(numpy.frombuffer(image, numpy.uint8), cv2.IMREAD_COLOR)
+
     def set_identifier(self, model:str=""):
         if model == "":
             with open("config.json") as cfg:
@@ -40,10 +43,57 @@ class FaceManager: #TODO make singleton
         #self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
         #self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
 
-    def find_face(self, face_crop):
+    async def db_update(self):
+        #TODO make function async and run it from within database setup
+        while True:
+            if self.params.DB_IP == "":
+                await asyncio.sleep(1)
+                continue
+            try:
+                async with websockets.connect("ws://"+self.params.DB_IP+"/ws/identities") as updater:
+                    async def receiver():
+                        while True:
+                            msg = await updater.recv()
+                            data = json.loads(msg)
+                            self.db_encodings = data["encodings"]
+                            self.db_labels = data["labels"]
+                            print("FaceManager updated from DB.")
+
+                    async def sender():
+                        while True:
+                            update = await self.update_queue.get()
+                            await updater.send(json.dumps(update))
+                            print("Sent update to server")
+                    
+                    await asyncio.gather(receiver(), sender())
+            except Exception as e:
+                print(f"FaceManager Websocket Error when db_update: {e}")
+                await asyncio.sleep(5)
+
+    def identify_faces(self, image, locations):
+        labels = []
         #TODO: run the trained NN first, then use on fail encoding fall back
         #return self.identify_face(face_crop)
-        return self.identify_face_fallback(face_crop) #on fail return id of face via encoding
+        for (x,y,w,h) in locations:
+
+            labels.append("?")
+            continue
+
+            face_crop = image[y:y+h, x:x+w]
+            id = self.identify_face_fallback(face_crop)
+
+            if id[0] is None: #if no match
+                update = {
+                    "id": str(uuid.uuid4()),
+                    "encoding": id[1].tolist(),
+                    "face": cv2.imencode('.jpg', face_crop)[1].decode('latin-1'),
+                    "label":"?"
+                }
+                self.update_queue.put_nowait(json.dumps(update))
+                labels.append("?")
+            else:
+                labels.append(self.db_labels[id])
+        return labels
                 
     def identify_face(self, face_crop):
         '''
@@ -76,8 +126,8 @@ class FaceManager: #TODO make singleton
             return match
 
 global database
-global face_manager
-face_manager = FaceManager()
+global facemanager
+facemanager = FaceManager()
 database = None
 app = fastapi.FastAPI()
 
@@ -89,42 +139,18 @@ async def root():
 async def update_encodings(request:fastapi.Request):
     encodings = await resp.json() #get list of all ids and their encodings
 
-@app.post("/identify_faces")
-async def identify_faces(request:fastapi.Request):
-    if face_manager.db_client is None:
-        return fastapi.responses.PlainTextResponse("Database not connected to identify people", status_code=400)
-
-    data = await request.json()
-    send_size = len(json.dumps(data).encode('utf-8'))
-    print("FM Receive:",send_size/1024/1024)
-
-    async with face_manager.db_client.get(url=f"{face_manager.params.DATABASE_IP}/identities", json={"timestamp":face_manager.last_update_timestamp}) as resp:
-        if resp.status == 200:
-            identities = await resp.json()
-            face_manager.db_encodings = identities["encodings"]
-            face_manager.db_labels = identities["labels"]
-            face_manager.last_update_timestamp = identities["timestamp"]
-    
-    for each in data:
-        face_b64 = each["face"]
-        face_webp = base64.b64decode(face_b64)
-        face_arr = numpy.frombuffer(face_webp, numpy.uint8)
-        face = cv2.imdecode(face_arr, cv2.IMREAD_COLOR)
-
-        id = face_manager.find_face(face)
-        if id[0] is None:
-            new_uuid = str(uuid.uuid4())
-            each["id"] = new_uuid
-            each["encoding"] = id[1].tolist()
-            if face_manager.db_client is not None:
-                each["label"] = "?"
-                async with face_manager.db_client.patch(url=f"{face_manager.params.DATABASE_IP}/identities", json=each) as resp:
-                    pass
-            face_manager.db_encodings[new_uuid] = id[1].tolist()
-            face_manager.db_labels[new_uuid] = "?"
-            continue
-        each["label"] = face_manager.db_labels[id]
-    return fastapi.responses.JSONResponse(data)
+@app.websocket("/ws/identify")
+async def identify(websocket: fastapi.WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            payload = json.loads(await websocket.receive_text())
+            locations = payload["locations"]
+            payload["labels"] = facemanager.identify_faces(facemanager.decode_image(payload["image"].encode("latin-1")), locations)
+            del payload["image"]
+            await websocket.send_text(json.dumps(payload))
+    except Exception as e:
+        print(f"FaceManager Websocket Error at /ws/identify:{e}")
 
 @app.get("/database_setup")
 async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:str="",port:str=""):
@@ -133,47 +159,44 @@ async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:st
         ip: the IP of a remote FaceManager that is already launched
         port: the port that the FaceManager is accepting requests to
     '''
-    if ip == "": #if no IP specified
+
+    if ip == "" and port == "":
         try:
             database = Popen(['python', 'databasemanager.py'])
         except Exception as e:
-            return fastapi.responses.PlainTextResponse(f"There was an issue with launching database locally:{e}", status_code=400)
-        ip = "127.0.0.1" #set IP to localhost
+            return fastapi.responses.PlainTextResponse(f"There was an issue with launching DatabaseManager locally:{e}", status_code=400)
+        ip = "localhost"
         port = 9255
     else:
         try:
+            if ip == "" or port == "":
+                raise Exception("IP or port is invalid")
             pattern = r"^((?:\d{1,3}\.){3}\d{1,3}):(\d{1,5})$"  # used to find ip and port
             ip_port = re.match(pattern, f"{ip}:{port}") #search for it
             if ip_port is None: #if there is no match
-                print(f"{ip}:{port} not valid")
-                raise Exception("IP is invalid")
+                raise Exception(f"{ip_port} is invalid")
         except:
-            return fastapi.responses.PlainTextResponse("IP & Port Invalid",status_code=400)
+            return fastapi.responses.PlainTextResponse("IP and/or port Invalid",status_code=400)
+    
     url = f"http://{ip}:{port}"
     start = time.time()
-    timeout = 300
+    timeout = 10
     try:
         while time.time() < start + timeout: #keep trying to connect until the connection is timed out
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url) as resp:
-                        if resp.status == 200:
+                        if resp.status == 200: #if facemanager responds, then set the IP
                             start = -1
-                            face_manager.params.DATABASE_IP = url
+                            facemanager.params.DB_IP = f"{ip}:{port}"
+                            facemanager.db_client = True #set to a sentinel value, connecto desired endpoint when necessary
+                            asyncio.create_task(facemanager.db_update())
             except Exception as e:
-                pass
+                await asyncio.sleep(0.5)
         if start != -1:
             raise Exception("Connection timed out")
     except Exception as e:
-        response.status_code = 400
-        return fastapi.responses.PlainTextResponse(f"There was an issue connecting to database:{e}")
-    face_manager.db_client = aiohttp.ClientSession()
-    async with face_manager.db_client.get(url+"/identities", json={"timestamp":-1}) as resp:
-        data = await resp.json()
-        face_manager.db_encodings = data["encodings"]
-        face_manager.db_labels = data["labels"]
-        face_manager.last_update_timestamp = data["timestamp"]
-    return fastapi.responses.PlainTextResponse("Database Connected")
+        return fastapi.responses.PlainTextResponse(f"There was an issue connecting to DatabaseManager:{e}", status_code = 400)
 
 if __name__ == "__main__":
-    uvicorn.run(app, port=9254)
+    uvicorn.run(app, host="0.0.0.0", port=9254)

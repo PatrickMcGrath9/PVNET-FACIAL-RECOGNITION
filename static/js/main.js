@@ -240,16 +240,30 @@ async function init() {
     checkStartEnable();
 }
 
-// Start streaming video with selected options
-startBtn.addEventListener('click', () => {
-    const detect = detectCheckbox.checked;
-    const identify = identifyCheckbox.checked;
-    video.src = `/video_feed?detect=${detect}&identify=${identify}&fps_target=30`;
-});
-
 window.onload = init;
 
 // Initially hide dropdown options
 optionsDropdown.style.display = "none";
 toggleOptionsBtn.textContent = "Options ▼";
 
+const canvas = document.getElementById("videoCanvas");
+const ctx = canvas.getContext("2d");
+
+startBtn.addEventListener('click', () => {
+    const detect = detectCheckbox.checked;
+    const identify = identifyCheckbox.checked;
+    const socket = new WebSocket(`ws://localhost:9253/ws/video_feed?detect=${detect}&identify=${identify}&fps_target=30`);
+    socket.binaryType = "arraybuffer";
+
+    socket.onmessage = (event) => {
+        const blob = new Blob([event.data], {type: 'image/jpeg'});
+        const url = URL.createObjectURL(blob);
+
+        const img = new Image();
+        img.onload = () => {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            URL.revokeObjectURL(url);  // cleanup
+        };
+        img.src = url;
+    };
+});
