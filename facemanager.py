@@ -34,6 +34,15 @@ class FaceManager: #TODO make singleton
     def decode_image(image):
         return cv2.imdecode(numpy.frombuffer(image, numpy.uint8), cv2.IMREAD_COLOR)
 
+    @staticmethod
+    def encode_image(image):
+        _,jpg_frame = cv2.imencode('.jpg', image)
+        return jpg_frame.tobytes()
+
+    @staticmethod
+    def convert_face_crops(faces):
+        return [FaceManager.decode_image(face.encode("latin-1")) for face in faces]
+
     def set_identifier(self, model:str=""):
         if model == "":
             with open("config.json") as cfg:
@@ -62,31 +71,26 @@ class FaceManager: #TODO make singleton
                     async def sender():
                         while True:
                             update = await self.update_queue.get()
-                            await updater.send(json.dumps(update))
+                            await updater.send(update)
                             print("Sent update to server")
                     
                     await asyncio.gather(receiver(), sender())
             except Exception as e:
                 print(f"FaceManager Websocket Error when db_update: {e}")
-                await asyncio.sleep(5)
+                await asyncio.sleep(0)
 
-    def identify_faces(self, image, locations):
+    def identify_faces(self, faces):
         labels = []
         #TODO: run the trained NN first, then use on fail encoding fall back
         #return self.identify_face(face_crop)
-        for (x,y,w,h) in locations:
-
-            labels.append("?")
-            continue
-
-            face_crop = image[y:y+h, x:x+w]
-            id = self.identify_face_fallback(face_crop)
+        for face in faces:
+            id = self.identify_face_fallback(face)
 
             if id[0] is None: #if no match
                 update = {
                     "id": str(uuid.uuid4()),
                     "encoding": id[1].tolist(),
-                    "face": cv2.imencode('.jpg', face_crop)[1].decode('latin-1'),
+                    "face": self.encode_image(face).decode('latin-1'),
                     "label":"?"
                 }
                 self.update_queue.put_nowait(json.dumps(update))
@@ -108,6 +112,7 @@ class FaceManager: #TODO make singleton
         if face_crop is None or face_crop.size == 0:
             raise ValueError("Empty face crop")
 
+        id_time = time.time()
         blob = cv2.dnn.blobFromImage(image=face_crop, size=(112,112), swapRB=True) # turn image into 'blob' for DNN input#, scalefactor=self.params.FRAME_SCALE_FACTOR
         self.embed_net.setInput(blob) #set the input
         embedding = self.embed_net.forward() #get embedding        
@@ -120,9 +125,11 @@ class FaceManager: #TODO make singleton
                 match = id #found!
                 break
         if match == -1: #if no match is found
+            print(f"Facemanager ID Time: {time.time()-id_time}")
             return (None,embedding)
         else:
             #TODO match found, update DB recent faces
+            print(f"Facemanager ID Time: {time.time()-id_time}")
             return match
 
 global database
@@ -145,9 +152,10 @@ async def identify(websocket: fastapi.WebSocket):
     try:
         while True:
             payload = json.loads(await websocket.receive_text())
-            locations = payload["locations"]
-            payload["labels"] = facemanager.identify_faces(facemanager.decode_image(payload["image"].encode("latin-1")), locations)
-            del payload["image"]
+            if time.time()-payload["time"] > 1:
+                continue
+            payload["labels"] = facemanager.identify_faces(facemanager.convert_face_crops(payload["faces"]))
+            del payload["faces"]
             await websocket.send_text(json.dumps(payload))
     except Exception as e:
         print(f"FaceManager Websocket Error at /ws/identify:{e}")

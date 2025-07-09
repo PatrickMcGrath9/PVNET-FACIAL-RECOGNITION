@@ -160,8 +160,8 @@ async def identities(websocket: fastapi.WebSocket):
     async def receiver():
         while True:
             data = json.loads(await websocket.receive_text())
-            image_b64 = base64.b64decode(data["face"])
-            image_arr = numpy.frombuffer(image_b64, numpy.uint8)
+
+            image_arr = numpy.frombuffer(data["face"].encode("latin-1"), numpy.uint8)
             image = cv2.imdecode(image_arr, cv2.IMREAD_COLOR)
             database.save_new_unknown(data["id"], image, data["encoding"])
             database.db_update_event.set()
@@ -182,6 +182,7 @@ async def identities(websocket: fastapi.WebSocket):
 
 @app.patch("/identities")
 async def add_identity(request:fastapi.Request):
+
     data = await request.json()
     database.save_new_unknown(data["id"], numpy.array(data["face"], dtype='uint8'), data["encoding"])
     database.last_update_timestamp = time.time()

@@ -30,6 +30,7 @@ class Client:
         self.params.INITIALIZED = False
         self.set_detector()
         self.supported = self.get_supported()
+        self.latest_fm_update = None
         self.params.INITIALIZED = True
 
     def __del__(self):
@@ -94,12 +95,21 @@ class Client:
             top_k #	keep top K bounding boxes before NMS
         )
 
-    def detect_face_locations(self):
-        faces = self.detector.detect(self.current_frame)[1] #detect face locations
+    def detect_face_locations(self, scale = 0.25):
+        img_h, img_w = self.current_frame.shape[:2]
+        small_frame = cv2.resize(self.current_frame, (int(img_w * scale), int(img_h * scale)))
+        
+        # Update detector input size temporarily
+        self.detector.setInputSize((int(img_w * scale), int(img_h * scale)))
+        
+        faces = self.detector.detect(small_frame)[1]
         if faces is not None: #if there are faces
             locations = []
             for i,face in enumerate(faces): #convert and truncate them to xywh format
-                locations.append((int(face[0]),int(face[1]),int(face[2]),int(face[3])))
+                x,y,w,h = face[0]/scale,face[1]/scale,face[2]/scale,face[3]/scale
+                if x < 0 or y < 0 or x+w > img_w or y+h > img_h:
+                    continue
+                locations.append((int(x),int(y),int(w),int(h)))
             return locations #return list of face locations
         else:
             return None
@@ -110,8 +120,11 @@ class Client:
         cv2.rectangle(self.current_frame, (x, y), (x+w, y-35), (0, 0, 255), cv2.FILLED)
         cv2.putText(self.current_frame, label, (x, y), cv2.FONT_HERSHEY_DUPLEX, 1.25, (255, 255, 255), 1, bottomLeftOrigin=False)
 
-    def get_encoded_frame(self):
-        _,jpg_frame = cv2.imencode('.jpg', self.current_frame)
+    def extract_encoded_face_crops(self, locations):
+        return [self.encode_image(self.current_frame[y:y+h, x:x+w]).decode("latin-1") for (x,y,w,h) in locations]
+
+    def encode_image(self, image):
+        _,jpg_frame = cv2.imencode('.jpg', image)
         return jpg_frame.tobytes()
 
     def cycle(self):
@@ -132,6 +145,17 @@ class Client:
         self.params.FRAME_COUNTER += 1
 
         return (True, self.current_frame)
+
+    async def fm_response_handler(self):
+        while True:
+            try:
+                if isinstance(self.fm_client,bool):
+                    return
+                response = json.loads(await self.fm_client.recv())
+                self.latest_fm_update = list(zip(response["locations"], response["labels"]))
+            except Exception as e:
+                print(f"FM response handler error: {e}")
+                await asyncio.sleep(0)
 
 
 global facemanager #global reference to facemanager process (if needed)
@@ -164,6 +188,9 @@ async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip
         port: the port that the FaceManager is accepting requests to
     Sample Request: http://localhost:9253/facemanager_setup
     '''
+    if client.params.FM_IP != "":
+        return fastapi.responses.PlainTextResponse("Facemanager Connected")
+
     if ip == "" and port == "":
         try:
             facemanager = Popen(['python', 'facemanager.py'])
@@ -198,7 +225,7 @@ async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip
                 await asyncio.sleep(0.5)
         if start != -1:
             raise Exception("Connection timed out")
-    except Exception as e:
+    except Exception as e:  
         response.status_code = 400
         return fastapi.responses.PlainTextResponse(f"There was an issue connecting to FaceManager:{e}")
     return fastapi.responses.PlainTextResponse("Facemanager Connected")
@@ -238,24 +265,27 @@ async def websocket_video(websocket: fastapi.WebSocket):
     client.set_detector()
     if client.fm_client is not None:
         client.fm_client = await websockets.connect("ws://"+client.params.FM_IP+"/ws/identify")
+        asyncio.create_task(client.fm_response_handler())
     try:
         while True:
             has_frame, _ = client.cycle()
             if not has_frame:
                 continue
-            
             locs = client.detect_face_locations()
-            if locs is not None:
+            if (locs is not None) and (len(locs) != 0):
                 if client.fm_client is not None:
-                    send = {"image":client.get_encoded_frame().decode('latin-1'), "locations":locs}
+                    send = {"faces":client.extract_encoded_face_crops(locs), "locations":locs, "time":time.time()}
                     await client.fm_client.send(json.dumps(send))
-                    response = json.loads(await client.fm_client.recv())
-                    for loc,label in zip(locs,response["labels"]):
-                        client.draw_face_box(loc, label)
+                    if client.latest_fm_update is not None:
+                        for each in client.latest_fm_update:
+                            loc = each[0]
+                            label = each[1]
+                            client.draw_face_box(loc, label)
                 else:
                     for loc in locs:
                         client.draw_face_box(loc, "?")
-            await websocket.send_bytes(client.get_encoded_frame())
+            await websocket.send_bytes(client.encode_image(client.current_frame))
+            await asyncio.sleep(0)
     except Exception as e:
         print(f"Client Websocket Error at /ws/video_feed: {e}")
     finally:
