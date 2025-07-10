@@ -109,7 +109,8 @@ button {
     border-radius: 8px;
 }
 
-
-
-
-
+#framerate-slider {
+    width: 100%;
+    max-width: 500px; /* or increase this value */
+    margin-top: 5px;
+}

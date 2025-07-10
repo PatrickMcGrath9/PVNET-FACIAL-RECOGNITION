@@ -53,7 +53,6 @@ class Client:
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000000) #capture height
         start_w = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
         start_h = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
         for width in range(start_w, 0, -100):
             for height in range(start_h, 0, -100):
                 self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width) #capture width
