@@ -48,9 +48,26 @@ class FaceManager: #TODO make singleton
             with open("config.json") as cfg:
                 model = json.load(cfg)["identifier_model_path"]
         self.embed_net = cv2.dnn.readNetFromONNX(model) #load recognition model
-        #OpenCV must include CUDA support
-        #self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-        #self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+
+        tried_configs = [
+            ("CUDA", cv2.dnn.DNN_BACKEND_CUDA, cv2.dnn.DNN_TARGET_CUDA),
+            ("CUDA_FP16", cv2.dnn.DNN_BACKEND_CUDA, cv2.dnn.DNN_TARGET_CUDA_FP16),
+            ("CPU", cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_CPU),
+        ]
+        dummy_input = numpy.random.randint(0, 256, (112, 112, 3), dtype=numpy.uint8)
+        for name, backend, target in tried_configs:
+            try:
+                self.embed_net.setPreferableBackend(backend)
+                self.embed_net.setPreferableTarget(target)
+                blob = cv2.dnn.blobFromImage(image=dummy_input, size=(112,112), swapRB=True)
+                self.embed_net.setInput(blob)
+                _ = self.embed_net.forward()  # Just run to see if it works
+                print(f"Successfully set backend: {name}")
+                return name  # Return the working config
+            except cv2.error as e:
+                print(f"Failed to set {name}: {e}")
+        
+        raise RuntimeError("No compatible backend/target configuration found.")
 
     async def db_update(self):
         #TODO make function async and run it from within database setup
