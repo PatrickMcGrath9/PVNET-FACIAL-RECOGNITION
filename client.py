@@ -1,15 +1,18 @@
 import cv2 #OpenCV, computer vision library. TODO CPU ONLY!
 import re #regex, for input validation
 import json
-
 from subprocess import Popen #for invoking facemanager
-
-#TODO WebUI
 import fastapi
 import uvicorn
 import asyncio
 import aiohttp
 import time
+import base64
+from urllib.parse import parse_qs
+import websockets
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 class Client:
     class params:
@@ -19,23 +22,56 @@ class Client:
         FRAME_RATE = 0
         FRAME_RATE_TARGET = 10
         FRAME_COUNTER = 0
-        FACEMANAGER_IP = ""
+        IMG_QUALITY = 75
+        FM_IP = ""
         INITIALIZED = False
 
     def __init__(self):
         self.params.INITIALIZED = False
-        self.current_frame = None
         self.set_detector()
+        self.supported = self.get_supported()
+        self.latest_fm_update = None
         self.params.INITIALIZED = True
 
     def __del__(self):
-        if self.capture is not None:
+        if hasattr(self, "capture"):
             self.capture.release()
-        if self.fm_client is not None:
+        if hasattr(self, "fm_client"):
             self.fm_client.close()
         self.params.INITIALIZED = False
         cv2.destroyAllWindows()
-        
+
+    def get_supported(self):
+        # #FOR TESTING ONLY
+        # return {"resolutions":[{"width":1280,"height":720},{"width":960,"height":540},{"width":848,"height":480},{"width":640,"height":360},{"width":424,"height":240},{"width":320,"height":180},{"width":640,"height":480},{"width":352,"height":288},{"width":320,"height":240}],"framerate":30}
+        # #FOR TESTING ONLY
+
+        supported = {"resolutions":[],"framerate":[]}
+        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1000000) #capture width
+        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000000) #capture height
+        start_w = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        start_h = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        for width in range(start_w, 0, -100):
+            for height in range(start_h, 0, -100):
+                self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width) #capture width
+                self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height) #capture height
+                temp_w = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+                temp_h = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                width = temp_w if temp_w < width else width
+                height = temp_h if temp_h < height else height
+
+                if {"width":temp_w,"height":temp_h} not in supported["resolutions"]:
+                    supported["resolutions"].append({"width":temp_w,"height":temp_h})
+
+        self.capture.set(cv2.CAP_PROP_FPS, self.params.FRAME_RATE_TARGET) #try and set target FPS
+        max_framerate = int(self.capture.get(cv2.CAP_PROP_FPS)) #retrieve actual FPS
+        supported["framerate"] = max_framerate
+
+        self.capture.release()
+        return supported
+
     def set_capture(self):
         self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.params.FRAME_WIDTH) #capture width
@@ -62,18 +98,24 @@ class Client:
             top_k #	keep top K bounding boxes before NMS
         )
 
-    def detect_face_locations(self, img):
-        faces = self.detector.detect(img)[1] #detect face locations
+    def detect_face_locations(self, scale = 0.25):
+        img_h, img_w = self.current_frame.shape[:2]
+        small_frame = cv2.resize(self.current_frame, (int(img_w * scale), int(img_h * scale)))
+        
+        # Update detector input size temporarily
+        self.detector.setInputSize((int(img_w * scale), int(img_h * scale)))
+        
+        faces = self.detector.detect(small_frame)[1]
         if faces is not None: #if there are faces
             locations = []
             for i,face in enumerate(faces): #convert and truncate them to xywh format
-                locations.append((int(face[0]),int(face[1]),int(face[2]),int(face[3])))
+                x,y,w,h = face[0]/scale,face[1]/scale,face[2]/scale,face[3]/scale
+                if x < 0 or y < 0 or x+w > img_w or y+h > img_h:
+                    continue
+                locations.append((int(x),int(y),int(w),int(h)))
             return locations #return list of face locations
         else:
             return None
-
-    def get_face_crops(self, img, locations):
-        return [img[y:y+h, x:x+w] for (x,y,w,h) in locations]
 
     def draw_face_box(self, location, label):
         (x, y, w, h) = location
@@ -81,7 +123,17 @@ class Client:
         cv2.rectangle(self.current_frame, (x, y), (x+w, y-35), (0, 0, 255), cv2.FILLED)
         cv2.putText(self.current_frame, label, (x, y), cv2.FONT_HERSHEY_DUPLEX, 1.25, (255, 255, 255), 1, bottomLeftOrigin=False)
 
+    def extract_encoded_face_crops(self, locations):
+        return [self.encode_image(self.current_frame[y:y+h, x:x+w]).decode("latin-1") for (x,y,w,h) in locations]
+
+    def encode_image(self, image):
+        _,jpg_frame = cv2.imencode('.jpg', image)
+        return jpg_frame.tobytes()
+
     def cycle(self):
+        if self.capture is None:
+            return (False, None)
+        
         has_frame, frame = self.capture.read()
         if not has_frame: #if there is no frame
             return (False, self.current_frame)
@@ -97,6 +149,18 @@ class Client:
 
         return (True, self.current_frame)
 
+    async def fm_response_handler(self):
+        while True:
+            try:
+                if isinstance(self.fm_client,bool):
+                    return
+                response = json.loads(await self.fm_client.recv())
+                self.latest_fm_update = list(zip(response["locations"], response["labels"]))
+            except Exception as e:
+                print(f"FM response handler error: {e}")
+                await asyncio.sleep(0)
+
+
 global facemanager #global reference to facemanager process (if needed)
 global client #global reference to client object
 facemanager = None
@@ -104,80 +168,20 @@ client = Client()
 
 app = fastapi.FastAPI()
 
+# Mount static files (for CSS, JS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Setup Jinja2 templates folder
+templates = Jinja2Templates(directory="templates")
+
 @app.get("/")
-async def root():
-    return fastapi.responses.PlainTextResponse("Client is running.")
+async def root(request: fastapi.Request):
+    # Serve the HTML UI from template file, passing request for Jinja2
+    return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/video_feed")
-async def video_feed(request:fastapi.Request,response:fastapi.Response, width:int=640, height:int=480,fps_target:int=60,identify:bool=False,detect:bool=False):
-    '''
-    Called to to display a stream of frames from the camera. Can specify optional URL parameters:
-        width: the desired width of the video capture
-        height: the desired height of the video capture
-        fps_target: the desired framerate for the video capture
-        identify: should faces be detected and identified?
-        detect: should client try detect faces?
-    Sample request: http://localhost:9253/video_feed?width=1280&height=720&fps_target=5&identify=true
-    '''
-    if identify and client.params.FACEMANAGER_IP == "":
-        #TODO tell front end to redirect to facemanager setup page
-        return fastapi.responses.PlainTextResponse("Cannot identify, FaceManager not connected", status_code=400)
-    
-    if client.params.INITIALIZED: #initialize client if not already
-        client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = width,height
-        client.params.FRAME_RATE_TARGET = fps_target
-        client.set_capture()
-        client.set_detector()
-    else:
-        return fastapi.responses.PlainTextResponse(f"Client not initialized", status_code=400)
-
-    async def stream_mpeg():
-        while True: #until something disrupts the connection
-            try:
-                if await request.is_disconnected():
-                    raise Exception("Client disconnected")
-
-                #capture frame
-                has_frame, _ = client.cycle()
-                if not has_frame:
-                    continue
-                
-                if identify: #if request for identifying
-                    locs = client.detect_face_locations(client.current_frame)
-                    if locs is not None:
-                        crops = client.get_face_crops(client.current_frame,locs)
-                        send = [{"face":face.tolist(),"location":loc} for face,loc in zip(crops, locs)]
-                        try:
-                            async with client.fm_client.post(url=f"{client.params.FACEMANAGER_IP}/identify_faces", json=send) as resp: 
-                                if resp.status == 200:
-                                    data = await resp.json() #get back data
-                                    for each in data:
-                                        location = each["location"]
-                                        label = each["label"]
-                                        client.draw_face_box(location, label) #draw boxes around faces
-                                elif resp.status == 400:
-                                    raise Exception("there was an error with reaching the facemanager")
-                        except aiohttp.client_exceptions.InvalidUrlClientError: #if facemanager not launched
-                            pass
-                        except Exception as e:
-                            raise Exception(f"Issue identifying faces: {e}")
-                elif detect:
-                    locs = client.detect_face_locations(client.current_frame)
-                    if locs is not None:
-                        client.draw_face_box(loc, "?")
-
-                img_bytes = cv2.imencode('.jpg', client.current_frame)[1].tobytes()
-                # write frame as part of multipart back to client
-                yield b'--frame\r\n' + b'Content-Type: image/jpeg\r\n\r\n' + img_bytes + b'\r\n'
-                await asyncio.sleep(0.000000001)  #allow buffer to flush
-            except Exception as e:
-                print(f"Error streaming video: {e}")
-                client.capture.release()
-                break #client probably just disconnected
-
-    response.headers["Content-Type"] = "multipart/x-mixed-replace; boundary=frame"
-    stream = fastapi.responses.StreamingResponse(stream_mpeg(), media_type="multipart/x-mixed-replace; boundary=frame")
-    return stream
+@app.get("/supported")
+async def get_supported():
+    return client.supported
 
 @app.get("/facemanager_setup")
 async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip:str="",port:str=""):
@@ -186,27 +190,31 @@ async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip
         ip: the IP of a remote FaceManager that is already launched
         port: the port that the FaceManager is accepting requests to
     Sample Request: http://localhost:9253/facemanager_setup
-    Note: Remote FaceManager has not been tested yet
     '''
-    if ip == "": #if no IP specified
+    if client.params.FM_IP != "":
+        return fastapi.responses.PlainTextResponse("Facemanager Connected")
+
+    if ip == "" and port == "":
         try:
-            facemanager = Popen(['python', 'facemanager.py']) #run the facemanager
+            facemanager = Popen(['python', 'facemanager.py'])
         except Exception as e:
             return fastapi.responses.PlainTextResponse(f"There was an issue with launching FaceManager locally:{e}", status_code=400)
-        ip = "127.0.0.1" #set IP to localhost
+        ip = "localhost"
         port = 9254
     else:
         try:
+            if ip == "" or port == "":
+                raise Exception("IP or port is invalid")
             pattern = r"^((?:\d{1,3}\.){3}\d{1,3}):(\d{1,5})$"  # used to find ip and port
             ip_port = re.match(pattern, f"{ip}:{port}") #search for it
             if ip_port is None: #if there is no match
-                print(f"{ip}:{port} not valid")
-                raise Exception("IP is invalid")
+                raise Exception(f"{ip_port} is invalid")
         except:
-            return fastapi.responses.PlainTextResponse("IP & Port Invalid",status_code=400)
+            return fastapi.responses.PlainTextResponse("IP and/or port Invalid",status_code=400)
+    
     url = f"http://{ip}:{port}"
     start = time.time()
-    timeout = 300
+    timeout = 10
     try:
         while time.time() < start + timeout: #keep trying to connect until the connection is timed out
             try:
@@ -214,16 +222,90 @@ async def facemanager_setup(request:fastapi.Request,response:fastapi.Response,ip
                     async with session.get(url) as resp:
                         if resp.status == 200: #if facemanager responds, then set the IP
                             start = -1
-                            client.params.FACEMANAGER_IP = url
+                            client.params.FM_IP = f"{ip}:{port}"
+                            client.fm_client = True #set to a sentinel value, connecto desired endpoint when necessary
             except Exception as e:
-                pass
+                await asyncio.sleep(0.5)
         if start != -1:
             raise Exception("Connection timed out")
-    except Exception as e:
+    except Exception as e:  
         response.status_code = 400
         return fastapi.responses.PlainTextResponse(f"There was an issue connecting to FaceManager:{e}")
-    client.fm_client = aiohttp.ClientSession()
     return fastapi.responses.PlainTextResponse("Facemanager Connected")
 
+@app.get("/database_setup")
+async def database_setup(request: fastapi.Request, response: fastapi.Response):
+    '''
+    Called to setup the DatabaseManager through the connected FaceManager.
+    Assumes FaceManager is already running and available.
+    '''
+    if client.params.FM_IP == "":
+        return fastapi.responses.PlainTextResponse("FaceManager not connected yet", status_code=400)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://{client.params.FM_IP}/database_setup") as resp:
+                if resp.status == 200:
+                    return fastapi.responses.PlainTextResponse("DatabaseManager Connected", status_code=200)
+                else:
+                    return fastapi.responses.PlainTextResponse(f"DatabaseManager setup failed: {await resp.text()}", status_code=resp.status)
+    except Exception as e:
+        return fastapi.responses.PlainTextResponse(f"Exception occurred while connecting to DatabaseManager: {e}", status_code=400)
+
+
+@app.websocket("/ws/video_feed")
+async def websocket_video(websocket: fastapi.WebSocket):
+    await websocket.accept()
+    query_params = parse_qs(websocket.url.query)
+    width = int(query_params.get("width", [640])[0])
+    height = int(query_params.get("height", [480])[0])
+    fps_target = int(query_params.get("fps_target", [60])[0])
+    identify = query_params.get("identify", ["false"])[0].lower() == "true"
+    detect = query_params.get("detect", ["false"])[0].lower() == "true"
+    client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = width,height
+    client.params.FRAME_RATE_TARGET = fps_target
+    try:
+        client.set_capture()
+    except Exception as e:
+        print(f"Failed to start capture")
+    client.set_detector()
+    if client.fm_client is not None:
+        client.fm_client = await websockets.connect("ws://"+client.params.FM_IP+"/ws/identify")
+        asyncio.create_task(client.fm_response_handler())
+    try:
+        while True:
+            has_frame, _ = client.cycle()
+            if not has_frame:
+                continue
+            locs = client.detect_face_locations()
+            if (locs is not None) and (len(locs) != 0):
+                if client.fm_client is not None:
+                    send = {"faces":client.extract_encoded_face_crops(locs), "locations":locs, "time":time.time()}
+                    await client.fm_client.send(json.dumps(send))
+                    if client.latest_fm_update is not None:
+                        for each in client.latest_fm_update:
+                            loc = each[0]
+                            label = each[1]
+                            client.draw_face_box(loc, label)
+                else:
+                    for loc in locs:
+                        client.draw_face_box(loc, "?")
+            await websocket.send_bytes(client.encode_image(client.current_frame))
+            await asyncio.sleep(0)
+    except Exception as e:
+        print(f"Client Websocket Error at /ws/video_feed: {e}")
+    finally:
+        if client.fm_client is not None:
+            await client.fm_client.close()
+            client.fm_client = True
+        client.capture.release()
+        await websocket.close()
+
 if __name__ == "__main__":      
-    uvicorn.run(app, port=9253)
+    uvicorn.run(app, host="0.0.0.0", port=9253)
+
+
+# Don't redirect, make a GET request
+# Use javascript (fetch)
+# Have image tag point to video feed endpoint
+
