@@ -13,6 +13,7 @@ from numpy import float32
 
 import uuid
 import websockets
+import onnxruntime
 
 class FaceManager: #TODO make singleton
     class params:
@@ -43,31 +44,15 @@ class FaceManager: #TODO make singleton
     def convert_face_crops(faces):
         return [FaceManager.decode_image(face.encode("latin-1")) for face in faces]
 
-    def set_identifier(self, model:str=""):
+   
+    def set_identifier(self, model: str = ""):
         if model == "":
             with open("config.json") as cfg:
                 model = json.load(cfg)["identifier_model_path"]
-        self.embed_net = cv2.dnn.readNetFromONNX(model) #load recognition model
 
-        tried_configs = [
-            ("CUDA", cv2.dnn.DNN_BACKEND_CUDA, cv2.dnn.DNN_TARGET_CUDA),
-            ("CUDA_FP16", cv2.dnn.DNN_BACKEND_CUDA, cv2.dnn.DNN_TARGET_CUDA_FP16),
-            ("CPU", cv2.dnn.DNN_BACKEND_OPENCV, cv2.dnn.DNN_TARGET_CPU),
-        ]
-        dummy_input = numpy.random.randint(0, 256, (112, 112, 3), dtype=numpy.uint8)
-        for name, backend, target in tried_configs:
-            try:
-                self.embed_net.setPreferableBackend(backend)
-                self.embed_net.setPreferableTarget(target)
-                blob = cv2.dnn.blobFromImage(image=dummy_input, size=(112,112), swapRB=True)
-                self.embed_net.setInput(blob)
-                _ = self.embed_net.forward()  # Just run to see if it works
-                print(f"Successfully set backend: {name}")
-                return name  # Return the working config
-            except cv2.error as e:
-                print(f"Failed to set {name}: {e}")
-        
-        raise RuntimeError("No compatible backend/target configuration found.")
+        execution_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        self.embed_net = onnxruntime.InferenceSession(model, providers=execution_providers)        
+        print(f"Using execution provider: {self.embed_net.get_providers()[0]}")
 
     async def db_update(self):
         #TODO make function async and run it from within database setup
@@ -130,9 +115,11 @@ class FaceManager: #TODO make singleton
             raise ValueError("Empty face crop")
 
         id_time = time.time()
-        blob = cv2.dnn.blobFromImage(image=face_crop, size=(112,112), swapRB=True) # turn image into 'blob' for DNN input#, scalefactor=self.params.FRAME_SCALE_FACTOR
-        self.embed_net.setInput(blob) #set the input
-        embedding = self.embed_net.forward() #get embedding        
+        blob = cv2.dnn.blobFromImage(image=face_crop, size=(112, 112), swapRB=True)  # Convert to blob
+        input_name = self.embed_net.get_inputs()[0].name  # Get the input layer name of the model
+        input_data = numpy.array(blob, dtype=float32)  # Convert to float32 if needed
+        outputs = self.embed_net.run(None, {input_name: input_data})
+        embedding = outputs[0]       
         
         match = -1
 

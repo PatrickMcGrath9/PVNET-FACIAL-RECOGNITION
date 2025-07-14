@@ -264,7 +264,10 @@ async def websocket_video(websocket: fastapi.WebSocket):
     detect = query_params.get("detect", ["false"])[0].lower() == "true"
     client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = width,height
     client.params.FRAME_RATE_TARGET = fps_target
-    client.set_capture()
+    try:
+        client.set_capture()
+    except Exception as e:
+        print(f"Failed to start capture")
     client.set_detector()
     if client.fm_client is not None:
         client.fm_client = await websockets.connect("ws://"+client.params.FM_IP+"/ws/identify")
