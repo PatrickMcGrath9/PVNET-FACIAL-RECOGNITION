@@ -49,7 +49,7 @@ class FaceManager: #TODO make singleton
         if model == "":
             with open("config.json") as cfg:
                 model = json.load(cfg)["identifier_model_path"]
-
+        onnxruntime.preload_dlls()
         execution_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
         self.embed_net = onnxruntime.InferenceSession(model, providers=execution_providers)        
         print(f"Using execution provider: {self.embed_net.get_providers()[0]}")
