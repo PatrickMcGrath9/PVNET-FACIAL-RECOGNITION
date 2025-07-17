@@ -292,32 +292,6 @@ function toggleStream(url, source) {
     }
 }
 
-// Start/Stop with detect/identify
-startBtn.addEventListener('click', () => {
-    const detect = detectCheckbox.checked;
-    const identify = identifyCheckbox.checked;
-    const [width, height] = resolutionSelect.value.split('x');
-    const fps = framerateSlider.value;
-    const url = `/video_feed?detect=${detect}&identify=${identify}&width=${width}&height=${height}&fps_target=${fps}`;
-    toggleStream(url, "start");
-});
-
-// Raw video feed
-videoBtn.addEventListener('click', () => {
-    const [width, height] = resolutionSelect.value.split('x');
-    const fps = framerateSlider.value;
-    const url = `/video_feed?detect=false&identify=false&width=${width}&height=${height}&fps_target=${fps}`;
-    toggleStream(url, "video");
-});
-
-// Stop the stream completely
-function stopStream() {
-    video.src = "";
-    startBtn.textContent = "Start";
-    streaming = false;
-    lastUsedSource = "";
-}
-
 // Start the stream with current settings and resolution/framerate
 function startStreamWithCurrentSettings() {
     const [width, height] = resolutionSelect.value.split('x');
@@ -379,21 +353,65 @@ toggleOptionsBtn.textContent = "Options ▼";
 const canvas = document.getElementById("videoCanvas");
 const ctx = canvas.getContext("2d");
 
-startBtn.addEventListener('click', () => {
+let socket = null;
+
+function startStreamSocket() {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.close();
+    }
+
     const detect = detectCheckbox.checked;
     const identify = identifyCheckbox.checked;
-    const socket = new WebSocket(`ws://localhost:9253/ws/video_feed?detect=${detect}&identify=${identify}&fps_target=30`);
-    socket.binaryType = "arraybuffer";
+    const fps = framerateSlider.value;
+    const url = `ws://localhost:9253/ws/video_feed?detect=${detect}&identify=${identify}&fps_target=${fps}`;
+
+    socket = new WebSocket(url);
+    socket.binaryType = 'arraybuffer';
+
+    let latestFrame = null;
+    let drawing = false;
 
     socket.onmessage = (event) => {
-        const blob = new Blob([event.data], {type: 'image/jpeg'});
+        latestFrame = event.data;
+        if (!drawing) drawLatestFrame();
+    };
+
+    function drawLatestFrame() {
+        if (!latestFrame) return;
+
+        drawing = true;
+
+        const blob = new Blob([latestFrame], { type: 'image/jpeg' });
+        const img = new Image();
         const url = URL.createObjectURL(blob);
 
-        const img = new Image();
         img.onload = () => {
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            URL.revokeObjectURL(url);  // cleanup
+            URL.revokeObjectURL(url);
+            drawing = false;
+            if (latestFrame) drawLatestFrame();
         };
+
         img.src = url;
+        latestFrame = null;
+    }
+
+    socket.onclose = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
     };
+
+    socket.onerror = (err) => {
+        console.error("Socket error:", err);
+    };
+}
+
+// Button hook
+startBtn.addEventListener('click', () => {
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
+        socket.close();
+        startBtn.textContent = "Start";
+    } else {
+        startStreamSocket();
+        startBtn.textContent = "Stop";
+    }
 });
