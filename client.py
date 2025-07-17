@@ -323,9 +323,7 @@ async def audit(request: Request, response: Response):
     return "PLACEHOLDER"
 
     #load front end
-
-    #get id -> label dict, send to front end 
-
+    
 @app.get("/audit/get_unknown")
 async def get_unknown(request: Request, response:Response):
     try:

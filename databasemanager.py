@@ -66,17 +66,16 @@ class DatabaseManager:
         SELECT person_id
         FROM people
         WHERE known=0
-        LIMIT 1
         ''')
-        id = cursor.fetchone()
+        id = cursor.fetchone()[0]
         # === Get Image ===
         cursor.execute('''
         SELECT image_path
         FROM faces
         WHERE person_id = ?
-        LIMIT 1
-        ''',id)
-        image = cv2.imread(cursor.fetchone())
+        ''',(id,))
+        path = cursor.fetchone()[0]
+        image = cv2.imread(path)
         image = self.encode_image(image)
         # === Return Formatted JSON ===
         return {"id":id, "image":f"data:image/jpeg;base64,{image}"}
