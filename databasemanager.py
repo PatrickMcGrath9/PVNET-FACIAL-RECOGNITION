@@ -1,5 +1,3 @@
-#TODO Convert to using actual database such as SQLite, add conversion from database to file system for model training
-
 import os
 import json
 import cv2

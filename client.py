@@ -215,9 +215,8 @@ class Client:
                 print(f"FM response handler error: {e}")
                 await sleep(0)
 
-
-global facemanager #global reference to facemanager process (if needed)
-global client #global reference to client object
+global facemanager
+global client
 facemanager = None
 client = Client()
 
@@ -225,8 +224,6 @@ app = FastAPI() #initialize the API
 
 # Mount static files (for CSS, JS)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Setup Jinja2 templates folder
 templates = Jinja2Templates(directory="templates")
 
 @app.get("/")
@@ -350,7 +347,7 @@ async def websocket_video(websocket: WebSocket):
     # === GETTING PARAMETERS ===
     width = int(query_params.get("width", [640])[0])
     height = int(query_params.get("height", [480])[0])
-    fps_target = int(query_params.get("fps_target", [60])[0])
+    fps_target = int(query_params.get("fps_target", [30])[0])
     identify = query_params.get("identify", ["false"])[0].lower() == "true"
     detect = query_params.get("detect", ["false"])[0].lower() == "true"
     # === SETTING PARAMETERS ===
@@ -403,3 +400,6 @@ async def websocket_video(websocket: WebSocket):
 if __name__ == "__main__":      
     run(app, host="0.0.0.0", port=9253)
 
+# # Don't redirect, make a GET request
+# # Use javascript (fetch)
+# # Have image tag point to video feed endpoint
