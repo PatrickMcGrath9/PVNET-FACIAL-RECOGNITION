@@ -1,32 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Face Auditor</title>
-    <link rel="stylesheet" href="/static/css/auditor.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unknown Faces Audit</title>
+    <link rel="stylesheet" href="/static/css/auditor.css">
 </head>
 <body>
-    <h1>Unknown Face Auditor</h1>
-
-    <div id="main-audit-layout">
-        <div id="face-list">
-            <h3>Unknown Faces</h3>
-            <ul id="id-list">
-                <!-- Dynamically filled list of face IDs -->
-            </ul>
-        </div>
-
-        <div id="face-details">
-            <canvas id="face-preview" width="300" height="300"></canvas>
-
-            <label for="name-input">Assign Name:</label>
-            <input type="text" id="name-input" placeholder="Enter name..." />
-
-            <button id="save-btn" disabled>Save Name</button>
-        </div>
-    </div>
-
-    <script src="/static/js/auditor.js"></script>
+    <h1>Unknown Faces Audit</h1>
+    <div id="unknown-faces-container"></div>
+    <script type="module" src="/static/js/auditor.js"></script>
 </body>
 </html>

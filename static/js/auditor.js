@@ -1,31 +1,183 @@
-document.addEventListener("DOMContentLoaded", () => {
-    const idList = document.getElementById("id-list");
-    const facePreview = document.getElementById("face-preview");
-    const nameInput = document.getElementById("name-input");
-    const saveBtn = document.getElementById("save-btn");
+// import { connectDatabaseManager, connectFaceManager, facemanagerConnected, databasemanagerConnected } from "./connection.js";
 
-    let selectedId = null;
+// async function loadUnknownFaces() {
+//     const container = document.getElementById("unknown-faces-container");
+//     container.innerHTML = ""; // clear previous
 
-    // Populate IDs (placeholder)
-    // This should fetch from backend
-    const dummyIds = ["unknown_001", "unknown_002", "unknown_003"];
-    dummyIds.forEach(id => {
-        const li = document.createElement("li");
-        li.textContent = id;
-        li.addEventListener("click", () => {
-            selectedId = id;
-            saveBtn.disabled = false;
-            nameInput.value = "";
-            // TODO: load image from backend and draw to canvas
+//     try {
+//         const response = await fetch("/audit/get_unknown");
+//         const data = await response.json();
+
+//         // data.faces is expected to be an array
+//         const unknownFaces = data.faces || [];
+
+//         unknownFaces.forEach((item) => {
+//             const card = document.createElement("div");
+//             card.className = "face-card";
+
+//             const img = document.createElement("img");
+//             img.src = item.image_url; // updated to match server field
+
+//             const input = document.createElement("input");
+//             input.placeholder = "Enter name";
+//             input.dataset.faceId = item.uid; // updated to match server field
+
+//             const button = document.createElement("button");
+//             button.textContent = "Assign Name";
+//             button.onclick = async () => {
+//                 const name = input.value.trim();
+//                 if (!name) {
+//                     alert("Please enter a name.");
+//                     return;
+//                 }
+//                 try {
+//                     const resp = await fetch("/audit", {
+//                         method: "PATCH",
+//                         headers: { "Content-Type": "application/json" },
+//                         body: JSON.stringify({ id: item.uid, name }), // updated field
+//                     });
+//                     if (resp.ok) {
+//                         alert("Name assigned!");
+//                         card.remove();
+//                     } else {
+//                         alert("Failed to assign name.");
+//                     }
+//                 } catch (e) {
+//                     console.error(e);
+//                     alert("Error assigning name.");
+//                 }
+//             };
+
+//             card.appendChild(img);
+//             card.appendChild(input);
+//             card.appendChild(button);
+//             container.appendChild(card);
+//         });
+
+//         if (unknownFaces.length === 0) {
+//             container.textContent = "No unknown faces to audit.";
+//         }
+//     } catch (err) {
+//         console.error("Failed to load unknown faces:", err);
+//         container.textContent = "Error loading unknown faces.";
+//     }
+// }
+
+// async function init(){
+//     const fm_resp = await connectFaceManager();
+//     if (facemanagerConnected) {
+//         const db_resp = await connectDatabaseManager();
+//     }
+//     await fetch('/audit/get_db_ip');
+
+//     loadUnknownFaces();
+// }
+
+// window.onload = init;
+
+import { connectFaceManager, connectDatabaseManager, facemanagerConnected, databasemanagerConnected } from "./connection.js";
+
+async function loadUnknownFaces() {
+    const container = document.getElementById("unknown-faces-container");
+    container.innerHTML = ""; // Clear previous content
+
+    try {
+        const response = await fetch("/audit/get_unknown");
+        if (!response.ok) {
+            throw new Error(`Failed to load unknown faces: HTTP ${response.status} - ${await response.text()}`);
+        }
+        const data = await response.json();
+
+        // Handle single object or array response
+        const unknownFaces = Array.isArray(data.faces) ? data.faces : [data];
+
+        if (unknownFaces.length === 0) {
+            container.textContent = "No unknown faces to audit.";
+            return;
+        }
+
+        unknownFaces.forEach((item) => {
+            const card = document.createElement("div");
+            card.className = "face-card";
+
+            const img = document.createElement("img");
+            img.src = item.image; // Use 'image' field from response
+            img.onerror = () => {
+                img.alt = "Failed to load image";
+                console.error(`Image load failed for ID: ${item.id}`);
+            };
+
+            const input = document.createElement("input");
+            input.placeholder = "Enter name";
+            input.dataset.faceId = item.id;
+
+            const button = document.createElement("button");
+            button.textContent = "Assign Name";
+            button.onclick = async () => {
+                const name = input.value.trim();
+                if (!name) {
+                    alert("Please enter a name.");
+                    return;
+                }
+                try {
+                    const resp = await fetch("/audit", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: item.id, name }),
+                    });
+                    if (resp.ok) {
+                        alert("Name assigned!");
+                        card.remove();
+                    } else {
+                        alert(`Failed to assign name: ${await resp.text()}`);
+                    }
+                } catch (e) {
+                    console.error("Error assigning name:", e);
+                    alert("Error assigning name.");
+                }
+            };
+
+            card.appendChild(img);
+            card.appendChild(input);
+            card.appendChild(button);
+            container.appendChild(card);
         });
-        idList.appendChild(li);
-    });
+    } catch (err) {
+        console.error("Failed to load unknown faces:", err);
+        container.textContent = `Error loading unknown faces: ${err.message}`;
+    }
+}
 
-    saveBtn.addEventListener("click", () => {
-        const name = nameInput.value.trim();
-        if (!name || !selectedId) return;
+async function init() {
+    try {
+        // Attempt to connect to FaceManager
+        const fmResult = await connectFaceManager();
+        console.log("FaceManager connection result:", fmResult);
+        if (!facemanagerConnected) {
+            throw new Error("FaceManager connection failed");
+        }
 
-        // TODO: send name and ID to backend
-        console.log(`Saving name "${name}" for ${selectedId}`);
-    });
-});
+        // Attempt to connect to DatabaseManager
+        const dbResult = await connectDatabaseManager();
+        console.log("DatabaseManager connection result:", dbResult);
+        if (!databasemanagerConnected) {
+            throw new Error("DatabaseManager connection failed");
+        }
+
+        // Fetch DB_IP
+        const dbIpResponse = await fetch("/audit/get_db_ip");
+        if (!dbIpResponse.ok) {
+            throw new Error(`Failed to get DB_IP: HTTP ${dbIpResponse.status} - ${await dbIpResponse.text()}`);
+        }
+        console.log("DB_IP response:", await dbIpResponse.text());
+
+        // Load unknown faces
+        await loadUnknownFaces();
+    } catch (err) {
+        console.error("Initialization error:", err);
+        const container = document.getElementById("unknown-faces-container");
+        container.textContent = `Initialization error: ${err.message}`;
+    }
+}
+
+window.onload = init;

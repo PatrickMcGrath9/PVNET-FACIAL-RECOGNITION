@@ -209,3 +209,25 @@ async def audit_patch(request: fastapi.Request, response: fastapi.Response):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=9255)
+
+@app.patch("/update_label")
+async def update_label(request: fastapi.Request):
+    data = await request.json()
+    person_id = data.get("id")
+    new_name = data.get("name")
+
+    if not person_id or not new_name:
+        return fastapi.responses.JSONResponse({"error": "Missing 'id' or 'name'"}, status_code=400)
+
+    cursor = database.db_connection.cursor()
+    try:
+        cursor.execute('''
+            UPDATE people
+            SET label = ?, known = 1
+            WHERE person_id = ?
+        ''', (new_name, person_id))
+        database.db_connection.commit()
+        return {"message": "Label updated successfully"}
+    except Exception as e:
+        return fastapi.responses.JSONResponse({"error": str(e)}, status_code=500)
+

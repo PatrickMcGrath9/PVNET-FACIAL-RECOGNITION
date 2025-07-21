@@ -52,9 +52,9 @@ class Client:
         '''
         Returns a list of main camera's supported resolutions and max frame rate
         '''
-        # #FOR TESTING ONLY
-        # return {"resolutions":[{"width":1280,"height":720},{"width":960,"height":540},{"width":848,"height":480},{"width":640,"height":360},{"width":424,"height":240},{"width":320,"height":180},{"width":640,"height":480},{"width":352,"height":288},{"width":320,"height":240}],"framerate":30}
-        # #FOR TESTING ONLY
+        #FOR TESTING ONLY
+        return {"resolutions":[{"width":1280,"height":720},{"width":960,"height":540},{"width":848,"height":480},{"width":640,"height":360},{"width":424,"height":240},{"width":320,"height":180},{"width":640,"height":480},{"width":352,"height":288},{"width":320,"height":240}],"framerate":30}
+        #FOR TESTING ONLY
 
         supported = {"resolutions":[],"framerate":[]}
         self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
@@ -311,15 +311,11 @@ async def database_setup(request: Request, response: Response):
         response.status_code = 400
         return f"Exception occurred while connecting to DatabaseManager: {e}"
 
-@app.get("/audit")
-async def audit(request: Request, response: Response):
-    async with ClientSession() as session:
-        async with session.get(f"http://{client.params.FM_IP}/db_ip") as resp:
-            client.params.DB_IP = (await resp.text()).strip("\"")
-
-    return "PLACEHOLDER"
-
-    #load front end
+# Make sure 'templates' directory contains auditor.html
+@app.get("/audit", response_class=HTMLResponse)
+async def audit_page(request: Request):
+    # Serve the auditor HTML pagex
+    return templates.TemplateResponse("auditor.html", {"request": request})
     
 @app.get("/audit/get_unknown")
 async def get_unknown(request: Request, response:Response):
@@ -330,6 +326,41 @@ async def get_unknown(request: Request, response:Response):
     except Exception as e:
         response.status_code = 400
         return f"CL Error:{e}"
+
+@app.get("/audit/get_db_ip")
+async def get_db_ip():
+     async with ClientSession() as session:
+        async with session.get(f"http://{client.params.FM_IP}/db_ip") as resp:
+            client.params.DB_IP = (await resp.text()).strip("\"")
+            return "Got DB IP"
+        
+        
+from fastapi import HTTPException
+
+@app.patch("/audit")
+async def audit_patch(request: Request, response: Response):
+    data = await request.json()
+    person_id = data.get("id")
+    new_name = data.get("name")
+
+    if not person_id or not new_name:
+        raise HTTPException(status_code=400, detail="Missing 'id' or 'name'")
+
+    # Forward this to DatabaseManager for updating label (name)
+    try:
+        async with ClientSession() as session:
+            url = f"http://{client.params.DB_IP}/update_label"
+            payload = {"id": person_id, "name": new_name}
+            async with session.patch(url, json=payload) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    response.status_code = resp.status
+                    return f"Failed to update label: {text}"
+                return {"message": "Label updated"}
+    except Exception as e:
+        response.status_code = 500
+        return f"Exception during label update: {e}"
+
     
 
 @app.websocket("/ws/video_feed")

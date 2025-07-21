@@ -12,10 +12,10 @@ const framerateValue = document.getElementById("framerate-value");
 const canvas = document.getElementById("videoCanvas");
 const ctx = canvas.getContext("2d");
 
-let facemanagerConnected = false;
-let databasemanagerConnected = false;
 let currentSocket = null;
 let currentStreamType = null; // "detect" or "video"
+
+import { connectDatabaseManager, connectFaceManager, facemanagerConnected, databasemanagerConnected } from "./connection.js";
 
 // Toggle dropdown options visibility
 toggleOptionsBtn.addEventListener("click", () => {
@@ -42,44 +42,6 @@ async function loadResolutions() {
         framerateValue.textContent = data.framerate;
     } catch (err) {
         console.error("Error loading resolutions or framerate:", err);
-    }
-}
-
-// Connect FaceManager
-async function connectFaceManager() {
-    facemanagerStatus.textContent = "Connecting...";
-    try {
-        const resp = await fetch('/facemanager_setup');
-        const text = await resp.text();
-        if (resp.ok) {
-            facemanagerStatus.textContent = "✅ " + text;
-            facemanagerConnected = true;
-        } else {
-            facemanagerStatus.textContent = "❌ " + text;
-            facemanagerConnected = false;
-        }
-    } catch (err) {
-        facemanagerStatus.textContent = "❌ Failed: " + err.message;
-        facemanagerConnected = false;
-    }
-}
-
-// Connect DatabaseManager
-async function connectDatabaseManager() {
-    databasemanagerStatus.textContent = "Connecting...";
-    try {
-        const resp = await fetch('/database_setup');
-        const text = await resp.text();
-        if (resp.ok) {
-            databasemanagerStatus.textContent = "✅ " + text;
-            databasemanagerConnected = true;
-        } else {
-            databasemanagerStatus.textContent = "❌ " + text;
-            databasemanagerConnected = false;
-        }
-    } catch (err) {
-        databasemanagerStatus.textContent = "❌ Failed: " + err.message;
-        databasemanagerConnected = false;
     }
 }
 
@@ -190,9 +152,29 @@ framerateSlider.addEventListener("input", () => {
 
 async function init() {
     await loadResolutions();
-    await connectFaceManager();
+    facemanagerStatus.textContent = "Connecting...";
+    try {
+        const fm_resp = await connectFaceManager();
+        if (facemanagerConnected) {
+            facemanagerStatus.textContent = "✅ " + fm_resp;
+        } else {
+            facemanagerStatus.textContent = "❌ " + fm_resp;
+        }
+    } catch (err) {
+        facemanagerStatus.textContent = "❌ Failed: " + err.message;
+    }
     if (facemanagerConnected) {
-        await connectDatabaseManager();
+        databasemanagerStatus.textContent = "Connecting...";
+        try {
+            const db_resp = await connectDatabaseManager();
+            if (databasemanagerConnected) {
+                databasemanagerStatus.textContent = "✅ " + db_resp;
+            } else {
+                databasemanagerStatus.textContent = "❌ " + db_resp;
+            }
+        } catch (err) {
+            databasemanagerStatus.textContent = "❌ Failed: " + err.message;
+        }
     }
     checkStartEnable();
     optionsDropdown.classList.add("hidden");
