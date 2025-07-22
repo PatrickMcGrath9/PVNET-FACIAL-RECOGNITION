@@ -112,16 +112,16 @@ async function loadUnknownFaces() {
             const button = document.createElement("button");
             button.textContent = "Assign Name";
             button.onclick = async () => {
-                const name = input.value.trim();
-                if (!name) {
+                const label = input.value.trim();
+                if (!label) {
                     alert("Please enter a name.");
                     return;
                 }
                 try {
-                    const resp = await fetch("/audit", {
+                    const resp = await fetch("/audit/update_unknown", {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ id: item.id, name }),
+                        body: JSON.stringify({ id: item.id, label }),
                     });
                     if (resp.ok) {
                         alert("Name assigned!");

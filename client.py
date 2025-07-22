@@ -329,7 +329,6 @@ async def audit_page(request: Request, response: Response):
     except Exception as e:
         response.status_code = 400
         return f"[Client] Error getting labels: {e}"
-    print(labels)
     return templates.TemplateResponse("auditor.html", {"request": request, "labels":labels})
     
 @app.get("/audit/get_unknown")

@@ -203,11 +203,9 @@ async def audit_get(request: fastapi.Request, response: fastapi.Response):
     except Exception as e:
         return {"error":str(e)}
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=9255)
-
 @app.patch("/update_unknown")
 async def update_unknown(request: fastapi.Request):
+    print("!!")
     data = await request.json()
     person_id = data.get("id")
     new_label = data.get("label")
@@ -223,7 +221,11 @@ async def update_unknown(request: fastapi.Request):
             WHERE person_id = ?
         ''', (new_label, person_id))
         database.db_connection.commit()
+        print(person_id, new_label)
         return {"message": "Label updated successfully"}
     except Exception as e:
         return fastapi.responses.JSONResponse({"error": str(e)}, status_code=500)
 
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=9255)
