@@ -1,10 +1,43 @@
 <!-- <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Facial Recognition Client</title>
-    <link rel="stylesheet" href="/static/css/styles.css?v=0.04" />
+    <link rel="stylesheet" type="text/css" href="/static/css/styles.css" />
+</head>
+<body>
+    <h1>Client is Running</h1>
+
+    <div id="status-container">
+        <p>FaceManager Status: <span id="facemanager-status">Initializing...</span></p>
+        <p>DatabaseManager Status: <span id="databasemanager-status">Waiting...</span></p>
+    </div>
+
+    <div id="controls">
+        <label><input type="checkbox" id="detect" checked> Detect Faces</label>
+        <label><input type="checkbox" id="identify" checked> Identify Faces</label>
+        <br />
+        <button id="start-btn" disabled>Start</button>
+    </div>
+
+    <img id="video" src="" style="max-width:100%; height:auto;" />
+
+    <script src="../static/js/main.js?v=0.04"></script>
+</body>
+</html>
+
+
+
+
+
+
+ -->
+
+
+ <!-- <!DOCTYPE html>
+<html>
+<head>
+    <title>Facial Recognition Client</title>
+    <link rel="stylesheet" type="text/css" href="/static/css/styles.css" />
 </head>
 <body>
     <h1>Client is Running</h1>
@@ -16,22 +49,17 @@
 
     <div id="controls">
         <button id="toggle-options">Options ▼</button>
-
-        <div id="options-dropdown" class="hidden">
+        <div id="options-dropdown">
             <label><input type="checkbox" id="detect" checked> Detect Faces</label><br />
             <label><input type="checkbox" id="identify" checked> Identify Faces</label>
         </div>
-
-        <label for="resolution-select" id="res-label">Resolution:</label>
-        <select id="resolution-select"></select>
-
+        <br />
         <button id="start-btn" disabled>Start</button>
-        <button id="video-btn">Video Feed</button>
     </div>
 
-    <img id="video" src="" alt="Video Feed" />
+    <img id="video" src="" style="max-width:100%; height:auto;" />
 
-    <script src="/static/js/main.js?v=0.12"></script>
+    <script src="/static/js/main.js?v=0.05"></script>
 </body>
 </html> -->
 
@@ -42,7 +70,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Facial Recognition Client</title>
-    <link rel="stylesheet" href="/static/css/styles.css?v=0.06" />
+    <link rel="stylesheet" href="/static/css/styles.css?v=0.01" />
 </head>
 <body>
     <h1>Client is Running</h1>
@@ -55,26 +83,17 @@
     <div id="controls">
         <button id="toggle-options">Options ▼</button>
 
-        <div id="options-dropdown" class="hidden">
+        <div id="options-dropdown">
             <label><input type="checkbox" id="detect" checked> Detect Faces</label><br />
             <label><input type="checkbox" id="identify" checked> Identify Faces</label>
         </div>
 
-        <label for="resolution-select" id="res-label">Resolution:</label>
-        <select id="resolution-select"></select>
-
-        <!-- Framerate slider -->
-        <label for="framerate-slider">Framerate: <span id="framerate-value">30</span></label>
-        <input type="range" id="framerate-slider" min="1" max="30" value="30" />
-
+        <br />
         <button id="start-btn" disabled>Start</button>
-        <button id="video-btn">Video Feed</button>
     </div>
 
-    <img id="video" src="" alt="Video Feed" />
+    <img id="video" src="" style="max-width:100%; height:auto;" />
 
-    <canvas id="videoCanvas" width="640" height="480"></canvas>
-
-    <script src="/static/js/main.js?v=0.14"></script>
+    <script src="/static/js/main.js?v=0.08"></script>
 </body>
 </html>
