@@ -1,60 +1,3 @@
-# import os
-# import cv2
-# import fastapi
-# import asyncio
-# import uvicorn
-
-# class DatabaseManager:
-#     def __init__(self, audit_dir="DB/audit", known_dir="DB/known"):
-#         """Initialize with directories for audit and known face images."""
-#         self.audit_dir = audit_dir
-#         self.known_dir = known_dir
-
-#         os.makedirs(self.audit_dir, exist_ok=True)
-#         os.makedirs(self.known_dir, exist_ok=True)
-
-#     def save_unknown_face(self, image, group_id):
-#         """
-#         Save the face image to the audit directory with a unique filename
-#         so we never overwrite earlier captures for the same unknown.
-#         """
-#         prefix = f"unknown_group_{group_id}"
-#         filename = f"{prefix}.jpg"
-#         filepath = os.path.join(self.audit_dir, filename)
-#         cv2.imwrite(filepath, image)
-
-
-# # ------------------- FastAPI Interface (Optional) -------------------
-
-# app = fastapi.FastAPI()
-
-# @app.get("/")
-# async def index():
-#     return fastapi.responses.PlainTextResponse("Database running")
-
-# @app.get("/audit")
-# async def audit_get():
-#     image_file_name = os.listdir("DB/audit")[0]
-#     id = image_file_name[len(image_file_name) - image_file_name[::-1].index("_"):image_file_name.index(".")]
-
-#     image_path = "DB/audit/" + image_file_name
-#     image = cv2.imread(image_path)
-
-#     if image is None:
-#         print(image_path)
-
-#     return fastapi.responses.JSONResponse({id: image.tolist()})
-
-# @app.put("/audit")
-# async def audit_put(audit_id, database_id):
-#     for image in os.listdir("DB/audit"):
-#         if audit_id == image[len(image) - image[::-1].index("_"):image.index(".")]:
-#             return fastapi.responses.PlainTextResponse("success")
-#     return fastapi.responses.PlainTextResponse("id not found", status_code=404)
-
-# if __name__ == "__main__":
-#     uvicorn.run(app)
-
 import os
 import json
 import cv2
@@ -64,78 +7,106 @@ import asyncio
 import uvicorn
 import time
 
+from uuid import uuid4
+from base64 import b64encode, b64decode
+import sqlite3
+
 class DatabaseManager:
-    def __init__(self, faces_dir="DB/faces", id_to_label_path="DB/id_to_label.json"):
-        self.faces_dir = faces_dir
-        self.id_to_label_path = id_to_label_path
-
-        self.id_to_label = {}
-        self.id_to_encoding = {}
-        self.read_labels()
-        self.read_encodings()        
-        self.db_update_event = asyncio.Event()
-        self.db_update_event.set()
-
+    def __init__(self, db_path="facial_recognition.db", face_images_path="DB/faces"):
+        self.face_images_path = face_images_path
+        os.makedirs(self.face_images_path, exist_ok=True)
         
-
-    def read_labels(self):
-        if not os.path.exists(self.id_to_label_path):
-            self.id_to_label = {}
-            if not os.path.exists("DB"):
-                os.makedirs("DB")
-            with open(self.id_to_label_path, "w") as f:
-                json.dump({},f)
-        else:
-            with open(self.id_to_label_path, "r") as f:
-                self.id_to_label = json.load(f)
-
-    def read_encodings(self):
-        if not os.path.exists(self.faces_dir):
-            os.makedirs(self.faces_dir, exist_ok=True)
-
-        for id in os.listdir(self.faces_dir):
-            path = os.path.join(self.faces_dir, id)
-            if not os.path.isdir(path):
-                continue
-            
-            encoding_json = os.path.join(path, "encoding.json")
-            if not os.path.exists(encoding_json):
-                continue
-
-            with open(encoding_json, "r") as f:
-                if id.startswith("!_"):
-                    id = id[2:]
-                self.id_to_encoding[id] = json.load(f)
+        self.db_connection = sqlite3.connect(db_path)
+        cursor = self.db_connection.cursor()
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS people (
+            person_id TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            encoding TEXT UNIQUE NOT NULL, -- as JSON string
+            known BOOL NOT NULL
+        )
+        ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS faces (
+            person_id TEXT PRIMARY KEY,
+            image_path TEXT UNIQUE NOT NULL
+        )
+        ''')
+        self.db_connection.commit()
+        self.db_update_event = asyncio.Event()
+        self.db_update_event.set()           
 
     def save_new_unknown(self, id, cropped_face_image, encoding):
-        self.id_to_encoding[id] = encoding
-        self.id_to_label[id] = "?"
+        # === Setup Data to Save ===
+        image_path = os.path.join(self.face_images_path, f"{id}_{uuid4().hex}.jpg")
+        cv2.imwrite(image_path, cropped_face_image)
+        encoding_json = json.dumps(encoding)
 
-        folder_path = os.path.join(self.faces_dir, "!_"+id)
-        os.makedirs(folder_path, exist_ok=True)
-
-        # onlyfiles = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and os.path.join(folder_path, f).endswith(".jpg")]
-        # for each in onlyfiles:
-        #     print(each)
-
-        lastindex = ""
-        folder_path = os.path.join(self.faces_dir, "!_"+id)
-        onlyjpgs = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and f.endswith(".jpg")]
-        if len(onlyjpgs) > 0:
-            onlyjpgs.sort()
-            lastindex = ''.join(char for char in onlyjpgs[-1] if char.isdigit())
-
-        img_path = os.path.join(folder_path, f"face{lastindex}.jpg")
-        cv2.imwrite(img_path, cropped_face_image)
-
-        json_path = os.path.join(folder_path, "encoding.json")
-        with open(json_path, "w") as f:
-            json.dump([encoding], f, indent=2)
-
-        with open(self.id_to_label_path, "w") as f:
-            json.dump(self.id_to_label, f)
-
+        # === Save to DB ===
+        cursor = self.db_connection.cursor()
+        cursor.execute('''
+        INSERT INTO people (person_id, label, encoding, known)
+        VALUES (?, ?, ?, ?)
+        ''',(id, "?", encoding_json, False))
+        cursor.execute('''
+        INSERT INTO faces (person_id, image_path)
+        VALUES (?, ?)
+        ''',(id, image_path))
+        
+        self.db_connection.commit()
         self.last_update_timestamp = time.time()
+
+    def get_first_unknown(self):
+        cursor = self.db_connection.cursor()
+
+        # === Get ID ===
+        cursor.execute('''
+        SELECT person_id
+        FROM people
+        WHERE known=0
+        ''')
+        id = cursor.fetchone()[0]
+        # === Get Image ===
+        cursor.execute('''
+        SELECT image_path
+        FROM faces
+        WHERE person_id = ?
+        ''',(id,))
+        path = cursor.fetchone()[0]
+        image = cv2.imread(path)
+        image = self.encode_image(image)
+        # === Return Formatted JSON ===
+        return {"id":id, "image":f"data:image/jpeg;base64,{image}"}
+
+    @staticmethod
+    def decode_image(image):
+        '''
+        Convert image from B64 string
+        '''
+        return cv2.imdecode(numpy.frombuffer(b64decode(image), dtype=numpy.uint8), cv2.IMREAD_COLOR)
+
+    @staticmethod
+    def encode_image(image):
+        '''
+        Convert image to B64 string
+        '''
+        return b64encode(cv2.imencode('.jpg', image)[1]).decode('utf-8')
+
+    def get_encodings(self):
+        cursor = self.db_connection.cursor()
+        cursor.execute('''
+        SELECT person_id, encoding
+        FROM people   
+        ''')
+        return numpy.array([(res[0],res[1]) for res in cursor.fetchall()])
+
+    def get_labels(self):
+        cursor = self.db_connection.cursor()
+        cursor.execute('''
+        SELECT person_id, label
+        FROM people   
+        ''')
+        return {res[0]:res[1] for res in cursor.fetchall()}
 
 global database
 database = DatabaseManager()
@@ -145,14 +116,6 @@ app = fastapi.FastAPI()
 async def root():
     return fastapi.responses.PlainTextResponse("DatabaseManager is running.")
 
-    @app.get("/identities")
-    async def get_identities(request:fastapi.Request):
-        data = await request.json()
-        if data["timestamp"] != database.last_update_timestamp:
-            return fastapi.responses.JSONResponse({"encodings":database.id_to_encoding,"labels":database.id_to_label,"timestamp":database.last_update_timestamp})
-        else:
-            return fastapi.responses.Response(status_code=204)
-
 @app.websocket("/ws/identities")
 async def identities(websocket: fastapi.WebSocket):
     await websocket.accept()
@@ -160,33 +123,32 @@ async def identities(websocket: fastapi.WebSocket):
     async def receiver():
         while True:
             data = json.loads(await websocket.receive_text())
-
-            image_arr = numpy.frombuffer(data["face"].encode("latin-1"), numpy.uint8)
-            image = cv2.imdecode(image_arr, cv2.IMREAD_COLOR)
-            database.save_new_unknown(data["id"], image, data["encoding"])
+            database.save_new_unknown(data["id"], database.decode_image(data["face"]), data["encoding"])
             database.db_update_event.set()
     async def sender():
         while True:
             await database.db_update_event.wait()
-            await websocket.send_text(json.dumps({"encodings":database.id_to_encoding, "labels":database.id_to_label}))
+
+            encodings = []
+            for person_id, encoding_json in database.get_encodings():
+                encoding = json.loads(encoding_json)  # turn JSON string into list
+                encodings.append([person_id, encoding])
+            
+            labels = database.get_labels()
+
+
+            await websocket.send_text(json.dumps({
+                "encodings": encodings,
+                "labels": labels
+            }))
             database.db_update_event.clear()
     try:
         await asyncio.gather(receiver(), sender())
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"DB WebSocket error at /ws/identities: {e}")
     finally:
         await websocket.close()
-        print("Client disconnected.")
-            
-            
-
-@app.patch("/identities")
-async def add_identity(request:fastapi.Request):
-
-    data = await request.json()
-    database.save_new_unknown(data["id"], numpy.array(data["face"], dtype='uint8'), data["encoding"])
-    database.last_update_timestamp = time.time()
-    return fastapi.responses.PlainTextResponse("Added identity")
+        print("Client disconnected.")            
 
 @app.get("/database_setup")
 async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:str="",port:str=""):
@@ -231,6 +193,39 @@ async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:st
         return fastapi.responses.PlainTextResponse(f"There was an issue connecting to database:{e}")
     client.db_client = aiohttp.ClientSession()
     return fastapi.responses.PlainTextResponse("Database Connected")
+
+@app.get("/get_unknown")
+async def audit_get(request: fastapi.Request, response: fastapi.Response):
+    try:
+        # Get one unknown from the database
+        unknown = database.get_first_unknown()  # you need this helper
+        return unknown  # will be returned as JSON
+    except Exception as e:
+        return {"error":str(e)}
+
+@app.patch("/update_unknown")
+async def update_unknown(request: fastapi.Request):
+    print("!!")
+    data = await request.json()
+    person_id = data.get("id")
+    new_label = data.get("label")
+
+    if not person_id or not new_label:
+        return fastapi.responses.JSONResponse({"error": "Missing 'id' or 'label'"}, status_code=400)
+
+    cursor = database.db_connection.cursor()
+    try:
+        cursor.execute('''
+            UPDATE people
+            SET label = ?, known = 1
+            WHERE person_id = ?
+        ''', (new_label, person_id))
+        database.db_connection.commit()
+        print(person_id, new_label)
+        return {"message": "Label updated successfully"}
+    except Exception as e:
+        return fastapi.responses.JSONResponse({"error": str(e)}, status_code=500)
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=9255)

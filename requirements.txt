@@ -1,0 +1,8 @@
+opencv-python
+fastapi
+uvicorn
+aiohttp
+websockets
+onnxruntime-gpu
+jinja2
+torch

@@ -182,3 +182,4 @@ cython_debug/
 DB/
 models/*
 !models/README.md
+facial_recognition.db

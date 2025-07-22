@@ -1,5 +1,4 @@
 import json #for serializing objects
-import gzip #for compression
 import cv2 #for facial recognition
 import numpy
 import aiohttp #for creating a client to talk to DB
@@ -13,7 +12,10 @@ from numpy import float32
 
 import uuid
 import websockets
+import torch
 import onnxruntime
+
+from base64 import b64encode, b64decode
 
 class FaceManager: #TODO make singleton
     class params:
@@ -22,34 +24,35 @@ class FaceManager: #TODO make singleton
         DB_IP = ""
     
     def __init__(self):
-        self.db_encodings = {}
+        self.db_encodings = numpy.array([])
         self.db_labels = {}
         self.update_queue = asyncio.Queue()
         self.set_identifier() #initialize face identifier model
+        self.initial_update = False
     
     def __del__(self):
         if hasattr(self, "db_client"):
-            self.db_client.close()
+            if not isinstance(self.db_client, bool):
+                self.db_client.close()
     
     @staticmethod
     def decode_image(image):
-        return cv2.imdecode(numpy.frombuffer(image, numpy.uint8), cv2.IMREAD_COLOR)
+        return cv2.imdecode(numpy.frombuffer(b64decode(image), dtype=numpy.uint8), cv2.IMREAD_COLOR)
 
     @staticmethod
     def encode_image(image):
-        _,jpg_frame = cv2.imencode('.jpg', image)
-        return jpg_frame.tobytes()
+        return b64encode(cv2.imencode('.jpg', image)[1]).decode('utf-8')
 
     @staticmethod
     def convert_face_crops(faces):
-        return [FaceManager.decode_image(face.encode("latin-1")) for face in faces]
+        return [FaceManager.decode_image(face) for face in faces]
 
    
     def set_identifier(self, model: str = ""):
         if model == "":
             with open("config.json") as cfg:
                 model = json.load(cfg)["identifier_model_path"]
-
+        onnxruntime.preload_dlls()
         execution_providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
         self.embed_net = onnxruntime.InferenceSession(model, providers=execution_providers)        
         print(f"Using execution provider: {self.embed_net.get_providers()[0]}")
@@ -66,9 +69,12 @@ class FaceManager: #TODO make singleton
                         while True:
                             msg = await updater.recv()
                             data = json.loads(msg)
+
+                            # Now encodings is a list of [id, encoding] pairs
                             self.db_encodings = data["encodings"]
                             self.db_labels = data["labels"]
                             print("FaceManager updated from DB.")
+                            self.initial_update = True
 
                     async def sender():
                         while True:
@@ -92,7 +98,7 @@ class FaceManager: #TODO make singleton
                 update = {
                     "id": str(uuid.uuid4()),
                     "encoding": id[1].tolist(),
-                    "face": self.encode_image(face).decode('latin-1'),
+                    "face": self.encode_image(face),
                     "label":"?"
                 }
                 self.update_queue.put_nowait(json.dumps(update))
@@ -114,7 +120,6 @@ class FaceManager: #TODO make singleton
         if face_crop is None or face_crop.size == 0:
             raise ValueError("Empty face crop")
 
-        id_time = time.time()
         blob = cv2.dnn.blobFromImage(image=face_crop, size=(112, 112), swapRB=True)  # Convert to blob
         input_name = self.embed_net.get_inputs()[0].name  # Get the input layer name of the model
         input_data = numpy.array(blob, dtype=float32)  # Convert to float32 if needed
@@ -123,17 +128,15 @@ class FaceManager: #TODO make singleton
         
         match = -1
 
-        for id,encoding in self.db_encodings.items(): #for every existing embeedding
+        for id,encoding in self.db_encodings: #for every existing embeedding
             dist = numpy.linalg.norm(embedding-numpy.array(encoding, dtype=float32)) #calculate distance between that embedding and the current
             if dist < FaceManager.params.ENCODING_MATCH_TOLERANCE: #if below some tolerance
                 match = id #found!
                 break
         if match == -1: #if no match is found
-            print(f"Facemanager ID Time: {time.time()-id_time}")
             return (None,embedding)
         else:
             #TODO match found, update DB recent faces
-            print(f"Facemanager ID Time: {time.time()-id_time}")
             return match
 
 global database
@@ -149,6 +152,37 @@ async def root():
 @app.post("/encodings")
 async def update_encodings(request:fastapi.Request):
     encodings = await resp.json() #get list of all ids and their encodings
+
+@app.get("/get_labels")
+async def get_labels():
+    while not facemanager.initial_update:
+        await asyncio.sleep(1)
+    return facemanager.db_labels
+
+@app.get("/get_unknown")
+async def get_unknown(response: fastapi.Response):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://{facemanager.params.DB_IP}/get_unknown") as resp:
+                return await resp.json()
+    except Exception as e:
+        response.status_code = 400
+        return f"[FaceManager] Error getting unknown: {e}"
+
+@app.patch("/update_unknown")
+async def update_unknown(request: fastapi.Request, response: fastapi.Response):
+    data = await request.json()
+    person_id = data.get("id")
+    label = data.get("label")
+    if not person_id or not label:
+        return "Missing 'id' or 'label'"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(f"http://{facemanager.params.DB_IP}/update_unknown", json=data) as resp: #TODO
+                return await resp.json()
+    except Exception as e:
+        response.status_code = 400
+        return f"[FaceManager] Error updating unknown: {e}"
 
 @app.websocket("/ws/identify")
 async def identify(websocket: fastapi.WebSocket):

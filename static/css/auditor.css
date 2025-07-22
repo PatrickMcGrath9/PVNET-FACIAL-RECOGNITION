@@ -1,0 +1,37 @@
+body {
+    font-family: Arial, sans-serif;
+    padding: 20px;
+    background-color: #f8f8f8;
+}
+
+h1 {
+    text-align: center;
+}
+
+#unknown-faces-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 20px;
+}
+
+.face-card {
+    background: white;
+    border: 1px solid #ccc;
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+    width: 200px;
+    box-shadow: 0 0 5px rgba(0,0,0,0.1);
+}
+
+.face-card img {
+    max-width: 100%;
+    border-radius: 5px;
+}
+
+.face-card input {
+    margin-top: 10px;
+    width: 100%;
+    padding: 5px;
+}

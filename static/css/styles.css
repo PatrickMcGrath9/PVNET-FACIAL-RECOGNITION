@@ -12,14 +12,22 @@ h1 {
     font-size: 1.1em;
 }
 
+/* Layout container for controls and video side by side */
+#main-layout {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 40px;
+    margin-top: 30px;
+    flex-wrap: wrap;
+}
+
+/* Controls styling */
 #controls {
-    margin-top: 20px;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     max-width: 300px;
-    margin-left: auto;
-    margin-right: auto;
 }
 
 button {
@@ -100,17 +108,24 @@ button {
     border: 1px solid #ccc;
 }
 
-#video {
-    display: block;
-    margin: 30px auto 0;
-    max-width: 100%;
-    height: auto;
-    border: 1px solid #ccc;
-    border-radius: 8px;
-}
-
 #framerate-slider {
     width: 100%;
-    max-width: 500px; /* or increase this value */
+    max-width: 500px;
     margin-top: 5px;
+}
+
+/* Video container and canvas */
+#video-container {
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start;
+    min-width: 640px;     /* prevents shifting when resolution changes */
+    min-height: 480px;
+}
+
+#videoCanvas {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    width: 640px;
+    height: 480px;
 }
