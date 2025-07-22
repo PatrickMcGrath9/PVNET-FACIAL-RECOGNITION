@@ -75,8 +75,6 @@
 
 // window.onload = init;
 
-import { connectFaceManager, connectDatabaseManager, facemanagerConnected, databasemanagerConnected } from "./connection.js";
-
 async function loadUnknownFaces() {
     const container = document.getElementById("unknown-faces-container");
     container.innerHTML = ""; // Clear previous content
@@ -150,27 +148,6 @@ async function loadUnknownFaces() {
 
 async function init() {
     try {
-        // Attempt to connect to FaceManager
-        const fmResult = await connectFaceManager();
-        console.log("FaceManager connection result:", fmResult);
-        if (!facemanagerConnected) {
-            throw new Error("FaceManager connection failed");
-        }
-
-        // Attempt to connect to DatabaseManager
-        const dbResult = await connectDatabaseManager();
-        console.log("DatabaseManager connection result:", dbResult);
-        if (!databasemanagerConnected) {
-            throw new Error("DatabaseManager connection failed");
-        }
-
-        // Fetch DB_IP
-        const dbIpResponse = await fetch("/audit/get_db_ip");
-        if (!dbIpResponse.ok) {
-            throw new Error(`Failed to get DB_IP: HTTP ${dbIpResponse.status} - ${await dbIpResponse.text()}`);
-        }
-        console.log("DB_IP response:", await dbIpResponse.text());
-
         // Load unknown faces
         await loadUnknownFaces();
     } catch (err) {

@@ -9,11 +9,6 @@
 <body>
     <h1>Client is Running</h1>
 
-    <div id="status-container">
-        <p>FaceManager Status: <span id="facemanager-status">Initializing...</span></p>
-        <p>DatabaseManager Status: <span id="databasemanager-status">Waiting...</span></p>
-    </div>
-
     <!-- Container for controls and video side by side -->
     <div id="main-layout">
         <div id="controls">
@@ -30,7 +25,7 @@
             <label for="framerate-slider">Framerate: <span id="framerate-value">30</span></label>
             <input type="range" id="framerate-slider" min="1" max="30" value="30" />
 
-            <button id="start-btn" disabled>Start</button>
+            <button id="start-btn">Start</button>
             <button id="video-btn">Video Feed</button>
         </div>
 

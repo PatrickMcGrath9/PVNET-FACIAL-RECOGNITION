@@ -227,7 +227,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 @app.get("/")
-async def root(request: Request):
+async def root(request: Request, response: Response):
+    await facemanager_setup(request, response)
+    await database_setup(request, response)
     # Serve the HTML UI from template file, passing request for Jinja2
     return templates.TemplateResponse("index.html", {"request": request})
 
@@ -299,6 +301,8 @@ async def database_setup(request: Request, response: Response):
     if client.params.FM_IP == "": #if the FaceManager IP is not set
         response.status_code = 400
         return "FaceManager not connected"
+    if client.params.DB_IP != "":
+        return "DatabaseManager connected"
     try:
         async with ClientSession() as session:
             async with session.get(f"http://{client.params.FM_IP}/database_setup") as resp: #fetch the FaceManager's database setup endpoint
@@ -313,54 +317,45 @@ async def database_setup(request: Request, response: Response):
 
 # Make sure 'templates' directory contains auditor.html
 @app.get("/audit", response_class=HTMLResponse)
-async def audit_page(request: Request):
+async def audit_page(request: Request, response: Response):
     # Serve the auditor HTML pagex
-    return templates.TemplateResponse("auditor.html", {"request": request})
+    await facemanager_setup(request, response)
+    await database_setup(request, response)
+    labels = {}
+    try:
+        async with ClientSession() as session:
+            async with session.get(f"http://{client.params.FM_IP}/get_labels") as resp:
+                labels = await resp.json()
+    except Exception as e:
+        response.status_code = 400
+        return f"[Client] Error getting labels: {e}"
+    print(labels)
+    return templates.TemplateResponse("auditor.html", {"request": request, "labels":labels})
     
 @app.get("/audit/get_unknown")
 async def get_unknown(request: Request, response:Response):
     try:
         async with ClientSession() as session:
-            async with session.get(f"http://{client.params.DB_IP}/get_unknown") as resp:
+            async with session.get(f"http://{client.params.FM_IP}/get_unknown") as resp: #TODO
                 return await resp.json()
     except Exception as e:
         response.status_code = 400
-        return f"CL Error:{e}"
+        return f"[Client] Error getting unknown: {e}"
 
-@app.get("/audit/get_db_ip")
-async def get_db_ip():
-     async with ClientSession() as session:
-        async with session.get(f"http://{client.params.FM_IP}/db_ip") as resp:
-            client.params.DB_IP = (await resp.text()).strip("\"")
-            return "Got DB IP"
-        
-        
-from fastapi import HTTPException
-
-@app.patch("/audit")
-async def audit_patch(request: Request, response: Response):
+@app.patch("/audit/update_unknown")
+async def update_unknown(request: Request, response:Response):
     data = await request.json()
     person_id = data.get("id")
-    new_name = data.get("name")
-
-    if not person_id or not new_name:
-        raise HTTPException(status_code=400, detail="Missing 'id' or 'name'")
-
-    # Forward this to DatabaseManager for updating label (name)
+    label = data.get("label")
+    if not person_id or not label:
+        return "Missing 'id' or 'label'"
     try:
         async with ClientSession() as session:
-            url = f"http://{client.params.DB_IP}/update_label"
-            payload = {"id": person_id, "name": new_name}
-            async with session.patch(url, json=payload) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    response.status_code = resp.status
-                    return f"Failed to update label: {text}"
-                return {"message": "Label updated"}
+            async with session.patch(f"http://{client.params.FM_IP}/update_unknown", json=data) as resp: #TODO
+                return await resp.json()
     except Exception as e:
-        response.status_code = 500
-        return f"Exception during label update: {e}"
-
+        response.status_code = 400
+        return f"[Client] Error updating unknown: {e}"
     
 
 @app.websocket("/ws/video_feed")

@@ -5,10 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Unknown Faces Audit</title>
     <link rel="stylesheet" href="/static/css/auditor.css">
+    <script type="module" src="/static/js/auditor.js"></script>
 </head>
 <body>
     <h1>Unknown Faces Audit</h1>
     <div id="unknown-faces-container"></div>
-    <script type="module" src="/static/js/auditor.js"></script>
 </body>
 </html>
+
+<script>
+    const labels = {{ labels | tojson }};
+</script>

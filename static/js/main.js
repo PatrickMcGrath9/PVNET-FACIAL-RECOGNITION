@@ -15,8 +15,6 @@ const ctx = canvas.getContext("2d");
 let currentSocket = null;
 let currentStreamType = null; // "detect" or "video"
 
-import { connectDatabaseManager, connectFaceManager, facemanagerConnected, databasemanagerConnected } from "./connection.js";
-
 // Toggle dropdown options visibility
 toggleOptionsBtn.addEventListener("click", () => {
     optionsDropdown.classList.toggle("hidden");
@@ -43,11 +41,6 @@ async function loadResolutions() {
     } catch (err) {
         console.error("Error loading resolutions or framerate:", err);
     }
-}
-
-// Enable Start button only if both managers connected
-function checkStartEnable() {
-    startBtn.disabled = !(facemanagerConnected && databasemanagerConnected);
 }
 
 // Close the current WebSocket stream if active
@@ -152,31 +145,6 @@ framerateSlider.addEventListener("input", () => {
 
 async function init() {
     await loadResolutions();
-    facemanagerStatus.textContent = "Connecting...";
-    try {
-        const fm_resp = await connectFaceManager();
-        if (facemanagerConnected) {
-            facemanagerStatus.textContent = "✅ " + fm_resp;
-        } else {
-            facemanagerStatus.textContent = "❌ " + fm_resp;
-        }
-    } catch (err) {
-        facemanagerStatus.textContent = "❌ Failed: " + err.message;
-    }
-    if (facemanagerConnected) {
-        databasemanagerStatus.textContent = "Connecting...";
-        try {
-            const db_resp = await connectDatabaseManager();
-            if (databasemanagerConnected) {
-                databasemanagerStatus.textContent = "✅ " + db_resp;
-            } else {
-                databasemanagerStatus.textContent = "❌ " + db_resp;
-            }
-        } catch (err) {
-            databasemanagerStatus.textContent = "❌ Failed: " + err.message;
-        }
-    }
-    checkStartEnable();
     optionsDropdown.classList.add("hidden");
     toggleOptionsBtn.textContent = "Options ▼";
 }

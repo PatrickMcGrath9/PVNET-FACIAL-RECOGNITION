@@ -28,6 +28,7 @@ class FaceManager: #TODO make singleton
         self.db_labels = {}
         self.update_queue = asyncio.Queue()
         self.set_identifier() #initialize face identifier model
+        self.initial_update = False
     
     def __del__(self):
         if hasattr(self, "db_client"):
@@ -73,8 +74,7 @@ class FaceManager: #TODO make singleton
                             self.db_encodings = data["encodings"]
                             self.db_labels = data["labels"]
                             print("FaceManager updated from DB.")
-
-                            print("FaceManager updated from DB.")
+                            self.initial_update = True
 
                     async def sender():
                         while True:
@@ -153,9 +153,36 @@ async def root():
 async def update_encodings(request:fastapi.Request):
     encodings = await resp.json() #get list of all ids and their encodings
 
-@app.get("/db_ip")
-async def pass_audit_get(request: fastapi.Request, response: fastapi.Response):
-    return facemanager.params.DB_IP
+@app.get("/get_labels")
+async def get_labels():
+    while not facemanager.initial_update:
+        await asyncio.sleep(1)
+    return facemanager.db_labels
+
+@app.get("/get_unknown")
+async def get_unknown(response: fastapi.Response):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://{facemanager.params.DB_IP}/get_unknown") as resp:
+                return await resp.json()
+    except Exception as e:
+        response.status_code = 400
+        return f"[FaceManager] Error getting unknown: {e}"
+
+@app.patch("/update_unknown")
+async def update_unknown(request: fastapi.Request, response: fastapi.Response):
+    data = await request.json()
+    person_id = data.get("id")
+    label = data.get("label")
+    if not person_id or not label:
+        return "Missing 'id' or 'label'"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(f"http://{facemanager.params.DB_IP}/update_unknown", json=data) as resp: #TODO
+                return await resp.json()
+    except Exception as e:
+        response.status_code = 400
+        return f"[FaceManager] Error updating unknown: {e}"
 
 @app.websocket("/ws/identify")
 async def identify(websocket: fastapi.WebSocket):
