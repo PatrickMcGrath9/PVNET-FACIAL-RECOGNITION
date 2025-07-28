@@ -20,7 +20,7 @@ from base64 import b64encode, b64decode
 class FaceManager: #TODO make singleton
     class params:
         FRAME_SCALE_FACTOR = 0.75  # Scale down for faster processing
-        ENCODING_MATCH_TOLERANCE = 27.0 #how far apart should encodings be to qualify as matches
+        ENCODING_MATCH_TOLERANCE = 25.0 #how far apart should encodings be to qualify as matches
         DB_IP = ""
     
     def __init__(self):
