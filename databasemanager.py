@@ -12,7 +12,7 @@ from base64 import b64encode, b64decode
 import sqlite3
 
 class DatabaseManager:
-    def __init__(self, db_path="facial_recognition.db", face_images_path="DB/faces"):
+    def __init__(self, db_path="DB/facial_recognition.db", face_images_path="DB/faces"):
         self.face_images_path = face_images_path
         os.makedirs(self.face_images_path, exist_ok=True)
         
@@ -205,7 +205,6 @@ async def audit_get(request: fastapi.Request, response: fastapi.Response):
 
 @app.patch("/update_unknown")
 async def update_unknown(request: fastapi.Request):
-    print("!!")
     data = await request.json()
     person_id = data.get("id")
     new_label = data.get("label")
@@ -221,7 +220,6 @@ async def update_unknown(request: fastapi.Request):
             WHERE person_id = ?
         ''', (new_label, person_id))
         database.db_connection.commit()
-        print(person_id, new_label)
         return {"message": "Label updated successfully"}
     except Exception as e:
         return fastapi.responses.JSONResponse({"error": str(e)}, status_code=500)

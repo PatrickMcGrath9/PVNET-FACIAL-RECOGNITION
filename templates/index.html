@@ -13,17 +13,25 @@
     <div id="main-layout">
         <div id="controls">
             <button id="toggle-options">Options ▼</button>
-
-            <div id="options-dropdown" class="hidden">
-                <label><input type="checkbox" id="detect" checked> Detect Faces</label><br />
-                <label><input type="checkbox" id="identify" checked> Identify Faces</label>
-            </div>
+            
+            {%set resolutions = supported['resolutions']%}
+            {%set framerate = supported['framerate']%}
 
             <label for="resolution-select" id="res-label">Resolution:</label>
-            <select id="resolution-select"></select>
+            <select id="resolution-select">
+                {%for resolution in resolutions%}
+                    <option value="{{resolution.width ~ 'x' ~ resolution.height}}">{{resolution.width ~ ' x ' ~ resolution.height}}</option>
+                {%endfor%}
+            </select>
 
-            <label for="framerate-slider">Framerate: <span id="framerate-value">30</span></label>
-            <input type="range" id="framerate-slider" min="1" max="30" value="30" />
+            <label for="framerate-slider">Framerate: <span id="framerate-value">{{framerate}}</span></label>
+            <input type="range" id="framerate-slider" min="1" max={{framerate}} value={{framerate}} />
+            
+            <label for="contrast-slider">Constrast</label>
+            <input type="range" id="contrast-slider" min="0" max="1000" value="{{current_constrast}}"/>
+
+            <label for="gamma-slider">Gamma</label>
+            <input type="range" id="gamma-slider" min="0" max="1000" value="{{current_gamma}}"/>
 
             <button id="start-btn">Start</button>
             <button id="video-btn">Video Feed</button>

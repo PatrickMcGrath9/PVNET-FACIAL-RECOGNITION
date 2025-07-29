@@ -19,8 +19,7 @@ from base64 import b64encode, b64decode
 
 class FaceManager: #TODO make singleton
     class params:
-        FRAME_SCALE_FACTOR = 0.75  # Scale down for faster processing
-        ENCODING_MATCH_TOLERANCE = 27.0 #how far apart should encodings be to qualify as matches
+        ENCODING_MATCH_TOLERANCE = 25.0 #how far apart should encodings be to qualify as matches
         DB_IP = ""
     
     def __init__(self):
@@ -130,7 +129,7 @@ class FaceManager: #TODO make singleton
 
         for id,encoding in self.db_encodings: #for every existing embeedding
             dist = numpy.linalg.norm(embedding-numpy.array(encoding, dtype=float32)) #calculate distance between that embedding and the current
-            if dist < FaceManager.params.ENCODING_MATCH_TOLERANCE: #if below some tolerance
+            if dist < self.params.ENCODING_MATCH_TOLERANCE: #if below some tolerance
                 match = id #found!
                 break
         if match == -1: #if no match is found
