@@ -1,6 +1,6 @@
 # === Selective Imports ===
 from re import match #input validation
-from json import load,loads, dumps #converting data to and from json
+from json import load, dump,loads, dumps #converting data to and from json
 from subprocess import Popen #invoking subprocesses
 from fastapi import FastAPI, Request, Response, responses, WebSocket #runs back/front end
 from uvicorn import run #runs server upon file execution
@@ -10,6 +10,7 @@ from urllib.parse import parse_qs #parsing websocket URL params
 from websockets import connect #providing websocket clients
 from time import time #for timeouts
 from base64 import b64encode, b64decode #encoding images
+import os
 
 # === WebUI ===
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +28,8 @@ class Client:
         '''
         Struct of parameters necessary for client to function
         '''
+        VIDEO_GAMMA = 120.0 #desired gamma for video (possibly 0-1000)
+        VIDEO_CONSTRAST = 32.0 #desired constrast for video (possibly 0-1000)
         FRAME_WIDTH = 640 #desired frame width
         FRAME_HEIGHT = 480 #desired frame height
         FRAME_RATE_SKIP = 0 #how many frames to skip
@@ -37,6 +40,8 @@ class Client:
         DB_IP = "" #IP of DatabaseManager
 
     def __init__(self):
+        self.video_api = self.find_fastest_api()
+        self.get_default_video_values()
         self.supported = self.get_supported() #return list of camera's supported resolutions and max framerate
         self.latest_fm_update = None #buffer of latest update from FaceManager
 
@@ -48,16 +53,27 @@ class Client:
             if not isinstance(self.fm_client,bool): #and not a sentinel
                 self.fm_client.close() #close connection
 
+    def get_default_video_values(self):
+        self.get_capture()
+        self.params.VIDEO_GAMMA = self.capture.get(cv2.CAP_PROP_GAMMA)
+        self.params.VIDEO_CONSTRAST = self.capture.get(cv2.CAP_PROP_CONTRAST)
+        self.capture.release()
+
+    def get_capture(self):
+        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+
     def get_supported(self):
         '''
         Returns a list of main camera's supported resolutions and max frame rate
         '''
-        #FOR TESTING ONLY
-        return {"resolutions":[{"width":1280,"height":720},{"width":960,"height":540},{"width":848,"height":480},{"width":640,"height":360},{"width":424,"height":240},{"width":320,"height":180},{"width":640,"height":480},{"width":352,"height":288},{"width":320,"height":240}],"framerate":30}
-        #FOR TESTING ONLY
+        print("Getting supported resolutions...")
+        settings_file = "camera_settings.json"
+        if os.path.exists(settings_file):
+            with open(settings_file, 'r') as f:
+                return load(f)
 
         supported = {"resolutions":[],"framerate":[]}
-        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+        self.get_capture()
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1000000) #set to high value to later get max
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000000) #set to high value to later get max
         start_w = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH)) #get the actual value
@@ -80,16 +96,36 @@ class Client:
         supported["framerate"] = max_framerate #store it
 
         self.capture.release() #release video
+        with open(settings_file, 'w') as f:
+            dump(supported, f)
         return supported
+
+    def find_fastest_api(self):
+        min_time = -1
+        best_api = None
+        for api in cv2.videoio_registry.getCameraBackends() + (cv2.CAP_ANY,):
+            start = time()
+            cap = cv2.VideoCapture(0, api)
+            if cap.isOpened():
+                time_taken = time()-start
+                print(f"API {api} took {time_taken}s")
+                if min_time == -1 or time_taken < min_time or api in [cv2.CAP_OBSENSOR]:
+                    best_api = api
+                    min_time = time_taken
+                cap.release()
+        return best_api if best_api is not None else cv2.CAP_ANY
 
     def set_capture(self):
         '''
         Initialize the camera's resolution and frame rate
         '''
-        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+        self.get_capture()
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.params.FRAME_WIDTH) #set video width
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.params.FRAME_HEIGHT) #set video height
         self.capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+        self.capture.set(cv2.CAP_PROP_GAMMA, self.params.VIDEO_GAMMA)
+        self.capture.set(cv2.CAP_PROP_AUTO_WB, 1)
+        self.capture.set(cv2.CAP_PROP_BRIGHTNESS, self.params.VIDEO_CONSTRAST)
         self.capture.set(cv2.CAP_PROP_FPS, self.params.FRAME_RATE_TARGET) #try and set target FPS
         self.params.FRAME_RATE = self.capture.get(cv2.CAP_PROP_FPS) #retrieve actual FPS
         self.params.FRAME_RATE_SKIP = int(self.params.FRAME_RATE / self.params.FRAME_RATE_TARGET) #calculate frame skip based on difference between target and actual
@@ -231,14 +267,7 @@ async def root(request: Request, response: Response):
     await facemanager_setup(request, response)
     await database_setup(request, response)
     # Serve the HTML UI from template file, passing request for Jinja2
-    return templates.TemplateResponse("index.html", {"request": request})
-
-@app.get("/supported")
-async def get_supported():
-    '''
-    Return the supported resolutions and framerate
-    '''
-    return client.supported
+    return templates.TemplateResponse("index.html", {"request": request, "supported":client.supported, "current_contrast":client.params.VIDEO_CONSTRAST, "current_gamma":client.params.VIDEO_GAMMA})
 
 @app.get("/facemanager_setup")
 async def facemanager_setup(request:Request,response:Response,ip:str="",port:str=""):
@@ -370,14 +399,18 @@ async def websocket_video(websocket: WebSocket):
     await websocket.accept() #wait for websocket connection to be accepted
     query_params = parse_qs(websocket.url.query) #get the query's url
     # === GETTING PARAMETERS ===
-    width = int(query_params.get("width", [640])[0])
-    height = int(query_params.get("height", [480])[0])
-    fps_target = int(query_params.get("fps_target", [30])[0])
+    width = int(query_params.get("width", [client.params.FRAME_WIDTH])[0])
+    height = int(query_params.get("height", [client.params.FRAME_HEIGHT])[0])
+    fps_target = int(query_params.get("fps_target", [client.params.FRAME_RATE_TARGET])[0])
+    gamma = float(query_params.get("gamma", [client.params.VIDEO_GAMMA])[0])
+    contrast = float(query_params.get("contrast", [client.params.VIDEO_CONSTRAST])[0])
     identify = query_params.get("identify", ["false"])[0].lower() == "true"
     detect = query_params.get("detect", ["false"])[0].lower() == "true"
     # === SETTING PARAMETERS ===
     client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = width,height
     client.params.FRAME_RATE_TARGET = fps_target
+    client.params.VIDEO_CONSTRAST = contrast
+    client.params.VIDEO_GAMMA = gamma
 
     client.set_detector() #initialize the facial detection
     if client.fm_client is not None: #if the FaceManager isn't connected
@@ -424,7 +457,3 @@ async def websocket_video(websocket: WebSocket):
 
 if __name__ == "__main__":      
     run(app, host="0.0.0.0", port=9253)
-
-# # Don't redirect, make a GET request
-# # Use javascript (fetch)
-# # Have image tag point to video feed endpoint
