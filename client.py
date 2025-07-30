@@ -60,7 +60,7 @@ class Client:
         self.capture.release()
 
     def get_capture(self):
-        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+        self.capture = cv2.VideoCapture(0, self.video_api) #open video input(index 0), and auto detect input type(CAP_ANY)
 
     def get_supported(self):
         '''
