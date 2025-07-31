@@ -4,13 +4,14 @@ from json import load, dump,loads, dumps #converting data to and from json
 from subprocess import Popen #invoking subprocesses
 from fastapi import FastAPI, Request, Response, responses, WebSocket #runs back/front end
 from uvicorn import run #runs server upon file execution
-from asyncio import sleep, create_task #asynchronous tasks
+from asyncio import sleep, create_task, gather, Queue #asynchronous tasks
 from aiohttp import ClientSession #connecting to endpoints to test if up
 from urllib.parse import parse_qs #parsing websocket URL params
 from websockets import connect #providing websocket clients
 from time import time #for timeouts
 from base64 import b64encode, b64decode #encoding images
 import os
+import threading
 
 # === WebUI ===
 from fastapi.staticfiles import StaticFiles
@@ -28,8 +29,8 @@ class Client:
         '''
         Struct of parameters necessary for client to function
         '''
-        VIDEO_GAMMA = 120.0 #desired gamma for video (possibly 0-1000)
-        VIDEO_CONSTRAST = 32.0 #desired constrast for video (possibly 0-1000)
+        VIDEO_GAMMA = 120 #desired gamma for video (possibly 0-1000)
+        VIDEO_CONSTRAST = 32 #desired constrast for video (possibly 0-1000)
         FRAME_WIDTH = 640 #desired frame width
         FRAME_HEIGHT = 480 #desired frame height
         FRAME_RATE_SKIP = 0 #how many frames to skip
@@ -40,27 +41,23 @@ class Client:
         DB_IP = "" #IP of DatabaseManager
 
     def __init__(self):
+        self.identify_queue = Queue()
+        self.video_capture = None
         self.video_api = self.find_fastest_api()
         self.get_default_video_values()
         self.supported = self.get_supported() #return list of camera's supported resolutions and max framerate
         self.latest_fm_update = None #buffer of latest update from FaceManager
 
     def __del__(self):
-        if hasattr(self, "capture"): #if video capture is set
-            if not isinstance(self.capture,bool): #and not a sentinel
-                self.capture.release() #release vide capture
         if hasattr(self, "fm_client"): #if FaceManager client is set
             if not isinstance(self.fm_client,bool): #and not a sentinel
                 self.fm_client.close() #close connection
 
     def get_default_video_values(self):
-        self.get_capture()
-        self.params.VIDEO_GAMMA = self.capture.get(cv2.CAP_PROP_GAMMA)
-        self.params.VIDEO_CONSTRAST = self.capture.get(cv2.CAP_PROP_CONTRAST)
-        self.capture.release()
-
-    def get_capture(self):
-        self.capture = cv2.VideoCapture(0, cv2.CAP_ANY) #open video input(index 0), and auto detect input type(CAP_ANY)
+        video_capture = cv2.VideoCapture(0, cv2.CAP_ANY)
+        self.params.VIDEO_GAMMA = int(video_capture.get(cv2.CAP_PROP_GAMMA))
+        self.params.VIDEO_CONSTRAST = int(video_capture.get(cv2.CAP_PROP_CONTRAST))
+        video_capture.release()
 
     def get_supported(self):
         '''
@@ -73,17 +70,17 @@ class Client:
                 return load(f)
 
         supported = {"resolutions":[],"framerate":[]}
-        self.get_capture()
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1000000) #set to high value to later get max
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000000) #set to high value to later get max
-        start_w = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH)) #get the actual value
-        start_h = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) #get the actual value
+        video_capture = cv2.VideoCapture(0, cv2.CAP_ANY)
+        video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1000000) #set to high value to later get max
+        video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1000000) #set to high value to later get max
+        start_w = int(video_capture.get(cv2.CAP_PROP_FRAME_WIDTH)) #get the actual value
+        start_h = int(video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) #get the actual value
         for width in range(start_w, 0, -100): #increment down from the max
             for height in range(start_h, 0, -100): #increment down from the max
-                self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width) #try setting the value
-                self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height) #try setting the value
-                temp_w = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH)) #get actual
-                temp_h = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) #get actual
+                video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, width) #try setting the value
+                video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height) #try setting the value
+                temp_w = int(video_capture.get(cv2.CAP_PROP_FRAME_WIDTH)) #get actual
+                temp_h = int(video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) #get actual
 
                 width = temp_w if temp_w < width else width #if the current actual value is less than the last actual, store it (also effectively skips unnecessary decrementation)
                 height = temp_h if temp_h < height else height #if the current actual value is less than the last actual, store it (also effectively skips unnecessary decrementation)
@@ -91,11 +88,11 @@ class Client:
                 if {"width":temp_w,"height":temp_h} not in supported["resolutions"]: #if the resolution is not in the list
                     supported["resolutions"].append({"width":temp_w,"height":temp_h}) #store it
 
-        self.capture.set(cv2.CAP_PROP_FPS, self.params.FRAME_RATE_TARGET) #try and set target FPS
-        max_framerate = int(self.capture.get(cv2.CAP_PROP_FPS)) #retrieve actual FPS
+        video_capture.set(cv2.CAP_PROP_FPS, self.params.FRAME_RATE_TARGET) #try and set target FPS
+        max_framerate = int(video_capture.get(cv2.CAP_PROP_FPS)) #retrieve actual FPS
         supported["framerate"] = max_framerate #store it
 
-        self.capture.release() #release video
+        video_capture.release() #release video
         with open(settings_file, 'w') as f:
             dump(supported, f)
         return supported
@@ -115,22 +112,25 @@ class Client:
                 cap.release()
         return best_api if best_api is not None else cv2.CAP_ANY
 
-    def set_capture(self):
+    async def get_capture(self):
         '''
         Initialize the camera's resolution and frame rate
         '''
-        self.get_capture()
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.params.FRAME_WIDTH) #set video width
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.params.FRAME_HEIGHT) #set video height
-        self.capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
-        self.capture.set(cv2.CAP_PROP_GAMMA, self.params.VIDEO_GAMMA)
-        self.capture.set(cv2.CAP_PROP_AUTO_WB, 1)
-        self.capture.set(cv2.CAP_PROP_BRIGHTNESS, self.params.VIDEO_CONSTRAST)
-        self.capture.set(cv2.CAP_PROP_FPS, self.params.FRAME_RATE_TARGET) #try and set target FPS
-        self.params.FRAME_RATE = self.capture.get(cv2.CAP_PROP_FPS) #retrieve actual FPS
+        while self.video_capture:
+            await sleep(0.01)
+        vid_cap = cv2.VideoCapture(0, cv2.CAP_ANY)
+        vid_cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.params.FRAME_WIDTH) #set video width
+        vid_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.params.FRAME_HEIGHT) #set video height
+        vid_cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+        vid_cap.set(cv2.CAP_PROP_GAMMA, self.params.VIDEO_GAMMA)
+        vid_cap.set(cv2.CAP_PROP_AUTO_WB, 1)
+        vid_cap.set(cv2.CAP_PROP_BRIGHTNESS, self.params.VIDEO_CONSTRAST)
+        vid_cap.set(cv2.CAP_PROP_FPS, self.params.FRAME_RATE_TARGET) #try and set target FPS
+        self.params.FRAME_RATE = vid_cap.get(cv2.CAP_PROP_FPS) #retrieve actual FPS
         self.params.FRAME_RATE_SKIP = int(self.params.FRAME_RATE / self.params.FRAME_RATE_TARGET) #calculate frame skip based on difference between target and actual
         self.params.FRAME_RATE_SKIP = self.params.FRAME_RATE_SKIP if self.params.FRAME_RATE_SKIP > 0 else 1 #if no skip needed, resort to 1 rather than 0
         self.cycle() #cycle the first frame to reduce load time of video feed
+        self.video_capture = vid_cap
 
     def set_detector(self, model:str="", config:str="",score_threshold:float=0.9, nms_threshold:float=0.3, top_k:int=5000):
         '''
@@ -219,10 +219,10 @@ class Client:
         '''
         Cycles the video capture, returns whether there was an update and the updated frame
         '''
-        if self.capture is None: #if capture is not set
+        if self.video_capture is None: #if capture is not set
             return (False, None)
         
-        has_frame, frame = self.capture.read() #read video input
+        has_frame, frame = self.video_capture.read() #read video input
         if not has_frame: #if there is no frame
             return (False, self.current_frame) #return last frame
 
@@ -237,18 +237,28 @@ class Client:
 
         return (True, self.current_frame)
 
-    async def fm_response_handler(self):
+    async def fm_identity(self):
         '''
         Handles responses from the FaceManager and queues to display information
         '''
         while True:
+            if self.params.FM_IP == "":
+                await sleep(1)
+                continue
             try:
-                if isinstance(self.fm_client,bool): #if FaceManager disconnected
-                    return #stop handler
-                response = loads(await self.fm_client.recv()) #wait to recieve data
-                self.latest_fm_update = list(zip(response["locations"], response["labels"])) #set the buffer
+                async with connect("ws://"+client.params.FM_IP+"/ws/identify") as updater:
+                    async def receiver():
+                        while True:
+                            msg = await updater.recv()
+                            data = loads(msg)
+                            self.latest_fm_update = list(zip(data["locations"], data["labels"]))
+                    async def sender():
+                        while True:
+                            identity = await self.identify_queue.get()
+                            await updater.send(identity)
+                    await gather(receiver(), sender())
             except Exception as e:
-                print(f"FM response handler error: {e}")
+                print(f"Client websocket error when fm_identity: {e}")
                 await sleep(0)
 
 global facemanager
@@ -263,14 +273,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 @app.get("/")
-async def root(request: Request, response: Response):
-    await facemanager_setup(request, response)
-    await database_setup(request, response)
+async def root(request: Request):
     # Serve the HTML UI from template file, passing request for Jinja2
     return templates.TemplateResponse("index.html", {"request": request, "supported":client.supported, "current_contrast":client.params.VIDEO_CONSTRAST, "current_gamma":client.params.VIDEO_GAMMA})
 
 @app.get("/facemanager_setup")
-async def facemanager_setup(request:Request,response:Response,ip:str="",port:str=""):
+async def facemanager_setup(ip:str="",port:str=""):
     '''
     Called to setup the FaceManager, can accept two optional URL parameters:
         ip: the IP of a remote FaceManager that is already launched
@@ -278,14 +286,13 @@ async def facemanager_setup(request:Request,response:Response,ip:str="",port:str
     Sample Request: http://localhost:9253/facemanager_setup
     '''
     if client.params.FM_IP != "": #if FaceManager IP is bound already
-        return "FaceManager Connected"
+        return responses.JSONResponse({"success":"FaceManager Connected"})
 
     if ip == "" and port == "": #if IP and Port are not provided
         try:
             facemanager = Popen(['python', 'facemanager.py']) #create FaceManager subprocess
         except Exception as e:
-            response.status_code = 400
-            return f"There was an issue with launching FaceManager locally:{e}"
+            return responses.JSONResponse({"error":f"There was an issue with launching FaceManager locally:{e}"}, status_code=400)
         ip = "localhost" #IP is local
         port = 9254 #Port is default
     else:
@@ -297,8 +304,7 @@ async def facemanager_setup(request:Request,response:Response,ip:str="",port:str
             if ip_port is None: #if there is no match
                 raise Exception(f"{ip_port} is invalid")
         except:
-            response.status_code = 400
-            return "IP and/or port Invalid"
+            return responses.JSONResponse({"error":e}, status_code=400)
     
     url = f"http://{ip}:{port}"
     start = time()
@@ -312,79 +318,54 @@ async def facemanager_setup(request:Request,response:Response,ip:str="",port:str
                             start = -1
                             client.params.FM_IP = f"{ip}:{port}"
                             client.fm_client = True #set to a sentinel value to show client may connect to desired endpoint when necessary
+                            create_task(client.fm_identity()) #offload handling and queueing responses to background
             except Exception as e:
                 await sleep(0.5)
         if start != -1:
             raise Exception("Connection timed out")
-    except Exception as e:  
-        response.status_code = 400
-        return f"There was an issue connecting to FaceManager:{e}"
-    return "FaceManager Connected"
-
-@app.get("/database_setup")
-async def database_setup(request: Request, response: Response):
-    '''
-    Called to setup the DatabaseManager through the connected FaceManager.
-    Assumes FaceManager is already running and available.
-    '''
-    if client.params.FM_IP == "": #if the FaceManager IP is not set
-        response.status_code = 400
-        return "FaceManager not connected"
-    if client.params.DB_IP != "":
-        return "DatabaseManager connected"
-    try:
-        async with ClientSession() as session:
-            async with session.get(f"http://{client.params.FM_IP}/database_setup") as resp: #fetch the FaceManager's database setup endpoint
-                if resp.status == 200:
-                    return "DatabaseManager Connected"
-                else:
-                    response.status_code=resp.status
-                    return f"DatabaseManager setup failed: {await resp.text()}"
     except Exception as e:
-        response.status_code = 400
-        return f"Exception occurred while connecting to DatabaseManager: {e}"
+        return responses.JSONResponse({"error":f"There was an issue connecting to FaceManager:{e}"}, status_code=400)
+    return responses.JSONResponse({"success":"FaceManager Connected"})
 
 # Make sure 'templates' directory contains auditor.html
 @app.get("/audit", response_class=HTMLResponse)
-async def audit_page(request: Request, response: Response):
+async def audit_page(request: Request):
     # Serve the auditor HTML pagex
-    await facemanager_setup(request, response)
-    await database_setup(request, response)
-    labels = {}
-    try:
-        async with ClientSession() as session:
-            async with session.get(f"http://{client.params.FM_IP}/get_labels") as resp:
-                labels = await resp.json()
-    except Exception as e:
-        response.status_code = 400
-        return f"[Client] Error getting labels: {e}"
-    return templates.TemplateResponse("auditor.html", {"request": request, "labels":labels})
+    return templates.TemplateResponse("auditor.html", {"request": request})
     
-@app.get("/audit/get_unknown")
-async def get_unknown(request: Request, response:Response):
+@app.get("/audit/unknown")
+async def get_unknown():
+    if client.params.FM_IP == "":
+        return responses.JSONResponse({"error":"FaceManager not connected"}, status_code=400)
     try:
         async with ClientSession() as session:
-            async with session.get(f"http://{client.params.FM_IP}/get_unknown") as resp: #TODO
+            async with session.get(f"http://{client.params.FM_IP}/unknown") as resp: #TODO
                 return await resp.json()
     except Exception as e:
-        response.status_code = 400
-        return f"[Client] Error getting unknown: {e}"
+        return responses.JSONResponse({"error":f"Error getting unknown: {e}"}, status_code=400)
 
-@app.patch("/audit/update_unknown")
-async def update_unknown(request: Request, response:Response):
+@app.patch("/audit/unknown")
+async def update_unknown(request: Request):
     data = await request.json()
-    person_id = data.get("id")
-    label = data.get("label")
-    if not person_id or not label:
-        return "Missing 'id' or 'label'"
+    if client.params.FM_IP == "":
+        return responses.JSONResponse({"error":"FaceManager not connected"}, status_code=400)
     try:
         async with ClientSession() as session:
-            async with session.patch(f"http://{client.params.FM_IP}/update_unknown", json=data) as resp: #TODO
+            async with session.patch(f"http://{client.params.FM_IP}/unknown", json=data) as resp: #TODO
                 return await resp.json()
     except Exception as e:
-        response.status_code = 400
-        return f"[Client] Error updating unknown: {e}"
+        return responses.JSONResponse({"error":f"Error updating unknown: {e}"}, status_code=400)
     
+@app.get("/audit/labels")
+async def get_labels():
+    if client.params.FM_IP == "":
+        return responses.JSONResponse({"error":"FaceManager not connected"}, status_code=400)
+    try:
+        async with ClientSession() as session:
+            async with session.get(f"http://{client.params.FM_IP}/audit/labels") as resp:
+                return await resp.json()
+    except Exception as e:
+        return responses.JSONResponse({"error":f"Error getting audit labels: {e}"}, status_code=400)
 
 @app.websocket("/ws/video_feed")
 async def websocket_video(websocket: WebSocket):
@@ -397,28 +378,24 @@ async def websocket_video(websocket: WebSocket):
         detect:bool | should faces be detected?
     '''
     await websocket.accept() #wait for websocket connection to be accepted
-    query_params = parse_qs(websocket.url.query) #get the query's url
+    query_params = websocket.query_params
     # === GETTING PARAMETERS ===
-    width = int(query_params.get("width", [client.params.FRAME_WIDTH])[0])
-    height = int(query_params.get("height", [client.params.FRAME_HEIGHT])[0])
-    fps_target = int(query_params.get("fps_target", [client.params.FRAME_RATE_TARGET])[0])
-    gamma = float(query_params.get("gamma", [client.params.VIDEO_GAMMA])[0])
-    contrast = float(query_params.get("contrast", [client.params.VIDEO_CONSTRAST])[0])
-    identify = query_params.get("identify", ["false"])[0].lower() == "true"
-    detect = query_params.get("detect", ["false"])[0].lower() == "true"
+    identify = True if query_params["identify"].lower() == "true" else False
+    detect = True if query_params["detect"].lower() == "true" else False
     # === SETTING PARAMETERS ===
-    client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = width,height
-    client.params.FRAME_RATE_TARGET = fps_target
-    client.params.VIDEO_CONSTRAST = contrast
-    client.params.VIDEO_GAMMA = gamma
+    client.params.FRAME_WIDTH, client.params.FRAME_HEIGHT = int(query_params["width"]), int(query_params["height"])
+    client.params.FRAME_RATE_TARGET = int(query_params["fps_target"])
+    client.params.VIDEO_CONSTRAST = int(query_params["contrast"])
+    client.params.VIDEO_GAMMA = int(query_params["gamma"])
 
-    client.set_detector() #initialize the facial detection
-    if client.fm_client is not None: #if the FaceManager isn't connected
-        client.fm_client = await connect("ws://"+client.params.FM_IP+"/ws/identify") #connect to it
-        create_task(client.fm_response_handler()) #offload handling and queueing responses to background
+    if detect:
+        client.set_detector() #initialize the facial detection
+    if identify:
+        if client.params.FM_IP == "":
+            websocket.close(1011, "FaceManager not connected")
 
-    client.set_capture()
     try:
+        await client.get_capture()
         while True:
             has_frame, _ = client.cycle() #get frame
             if not has_frame:
@@ -428,7 +405,7 @@ async def websocket_video(websocket: WebSocket):
                 locs = client.detect_face_locations() #detect face locations
                 if identify and client.fm_client is not None: #if identifying and FaceManager connection made
                     send = {"faces":client.extract_encoded_face_crops(client.current_frame, locs), "locations":locs, "time":time()} #organize data to send
-                    await client.fm_client.send(dumps(send)) #convert to string and send it
+                    client.identify_queue.put_nowait(dumps(send)) #convert to string and send it
                     if client.latest_fm_update is not None: #whatever the latest update from FaceManager is
                         for each in client.latest_fm_update: #draw each
                             loc = each[0]
@@ -437,21 +414,25 @@ async def websocket_video(websocket: WebSocket):
                 else:
                     for loc in locs: #for each location
                         client.draw_face_box(loc, "?") #person is not identified    
-            await websocket.send_bytes(cv2.imencode(".jpg", client.current_frame)[1].tobytes()) #send the current frame (with updates if applicable)
+            try:
+                await websocket.send_bytes(cv2.imencode(".jpg", client.current_frame)[1].tobytes()) #send the current frame (with updates if applicable)
+            except:
+                break
             await sleep(0)
     except Exception as e:
-        print(f"Client Websocket Error at /ws/video_feed: {e}")
+        websocket.close(1011, f"Client Websocket Error at /ws/video_feed: {e}")
     finally:
         try:
-            if client.fm_client is not None:
-                await client.fm_client.close()
-                client.fm_client = True
-            if client.capture is not None:
-                client.capture.release()
+            if hasattr(client, "fm_client"):
+                if not isinstance(client.fm_client, bool):
+                    await client.fm_client.close()
+                    client.fm_client = True
             try:
                 await websocket.close()
             except RuntimeError:
                 pass  # websocket already closed
+            client.video_capture.release()
+            client.video_capture = None
         except Exception as e:
             print(f"Exception during cleanup: {e}")
 

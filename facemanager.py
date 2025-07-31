@@ -23,7 +23,7 @@ class FaceManager: #TODO make singleton
         DB_IP = ""
     
     def __init__(self):
-        self.db_encodings = numpy.array([])
+        self.db_encodings = {}
         self.db_labels = {}
         self.update_queue = asyncio.Queue()
         self.set_identifier() #initialize face identifier model
@@ -68,10 +68,8 @@ class FaceManager: #TODO make singleton
                         while True:
                             msg = await updater.recv()
                             data = json.loads(msg)
-
-                            # Now encodings is a list of [id, encoding] pairs
-                            self.db_encodings = data["encodings"]
-                            self.db_labels = data["labels"]
+                            self.db_encodings = {id:json.loads(encoding) for id,encoding in data["encodings"]}
+                            self.db_labels = {id:label for id,label in data["labels"]}
                             print("FaceManager updated from DB.")
                             self.initial_update = True
 
@@ -97,8 +95,7 @@ class FaceManager: #TODO make singleton
                 update = {
                     "id": str(uuid.uuid4()),
                     "encoding": id[1].tolist(),
-                    "face": self.encode_image(face),
-                    "label":"?"
+                    "face_image": self.encode_image(face),
                 }
                 self.update_queue.put_nowait(json.dumps(update))
                 labels.append("?")
@@ -125,14 +122,15 @@ class FaceManager: #TODO make singleton
         outputs = self.embed_net.run(None, {input_name: input_data})
         embedding = outputs[0]       
         
-        match = -1
+        match = None
 
-        for id,encoding in self.db_encodings: #for every existing embeedding
+        for id in self.db_encodings.keys(): #for every existing embeedding
+            encoding = self.db_encodings[id]
             dist = numpy.linalg.norm(embedding-numpy.array(encoding, dtype=float32)) #calculate distance between that embedding and the current
             if dist < self.params.ENCODING_MATCH_TOLERANCE: #if below some tolerance
                 match = id #found!
                 break
-        if match == -1: #if no match is found
+        if not match:
             return (None,embedding)
         else:
             #TODO match found, update DB recent faces
@@ -146,46 +144,56 @@ app = fastapi.FastAPI()
 
 @app.get("/")
 async def root():
-    return fastapi.responses.PlainTextResponse("FaceManager is running.")
+    return "FaceManager is running."
 
-@app.post("/encodings")
-async def update_encodings(request:fastapi.Request):
-    encodings = await resp.json() #get list of all ids and their encodings
-
-@app.get("/get_labels")
+@app.get("/labels")
 async def get_labels():
-    while not facemanager.initial_update:
-        await asyncio.sleep(1)
+    if facemanager.params.DB_IP == "":
+        await database_setup()
+    if not facemanager.initial_update:
+        return fastapi.responses.JSONResponse({"error":"FaceManager has not been initated by Database"}, status_code=400)
     return facemanager.db_labels
 
-@app.get("/get_unknown")
-async def get_unknown(response: fastapi.Response):
+@app.get("/audit/labels")
+async def get_labels():
+    if facemanager.params.DB_IP == "":
+        await database_setup()
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"http://{facemanager.params.DB_IP}/get_unknown") as resp:
+            async with session.get(f"http://{facemanager.params.DB_IP}/audit/labels") as resp:
                 return await resp.json()
     except Exception as e:
-        response.status_code = 400
-        return f"[FaceManager] Error getting unknown: {e}"
+        return fastapi.responses.JSONResponse({"error":f"[FaceManager] Error getting audit labels: {e}"}, status_code=400)
 
-@app.patch("/update_unknown")
-async def update_unknown(request: fastapi.Request, response: fastapi.Response):
-    data = await request.json()
-    person_id = data.get("id")
-    label = data.get("label")
-    if not person_id or not label:
-        return "Missing 'id' or 'label'"
+@app.get("/unknown")
+async def get_unknown():
+    if facemanager.params.DB_IP == "":
+        await database_setup()
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.patch(f"http://{facemanager.params.DB_IP}/update_unknown", json=data) as resp: #TODO
+            async with session.get(f"http://{facemanager.params.DB_IP}/unknown") as resp:
                 return await resp.json()
     except Exception as e:
-        response.status_code = 400
-        return f"[FaceManager] Error updating unknown: {e}"
+        return fastapi.responses.JSONResponse({"error":f"[FaceManager] Error getting unknown: {e}"}, status_code=400)
+
+@app.patch("/unknown")
+async def update_unknown(request:fastapi.Request):
+    if facemanager.params.DB_IP == "":
+        await database_setup()
+    try:
+        data = await request.json()
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(f"http://{facemanager.params.DB_IP}/unknown", json=data) as resp:
+                print(await resp.json())
+                return await resp.json()
+    except Exception as e:
+        return fastapi.responses.JSONResponse({"error":f"[FaceManager] Error updating unknown: {e}"}, status_code=400)
 
 @app.websocket("/ws/identify")
 async def identify(websocket: fastapi.WebSocket):
     await websocket.accept()
+    if facemanager.params.DB_IP == "":
+        await database_setup()
     try:
         while True:
             payload = json.loads(await websocket.receive_text())
@@ -198,12 +206,14 @@ async def identify(websocket: fastapi.WebSocket):
         print(f"FaceManager Websocket Error at /ws/identify:{e}")
 
 @app.get("/database_setup")
-async def database_setup(request:fastapi.Request,response:fastapi.Response,ip:str="",port:str=""):
+async def database_setup(ip:str="",port:str=""):
     '''
     Called to setup the database, can accept two optional URL parameters:
         ip: the IP of a remote FaceManager that is already launched
         port: the port that the FaceManager is accepting requests to
     '''
+    if facemanager.params.DB_IP != "":
+        return "Database Connected"
 
     if ip == "" and port == "":
         try:

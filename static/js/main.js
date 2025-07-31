@@ -15,6 +15,8 @@ const ctx = canvas.getContext("2d");
 let currentSocket = null;
 let currentStreamType = null; // "detect" or "video"
 
+import {facemanagerConnected, connectFaceManager} from './connection.js'
+
 // Toggle dropdown options visibility
 toggleOptionsBtn.addEventListener("click", () => {
     optionsDropdown.classList.toggle("hidden");
@@ -58,7 +60,12 @@ function startStream(should_detect=null, should_identify=null){
 }
 
 // Start/Stop detection stream
-startBtn.addEventListener('click', () => {
+startBtn.addEventListener('click', async () => {
+    if (!facemanagerConnected){
+        startBtn.setAttribute("disabled", true);
+        await connectFaceManager();
+        startBtn.removeAttribute("disabled");
+    }
     if (currentStreamType === "detect") {
         closeCurrentStream();
     } else {
