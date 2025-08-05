@@ -58,11 +58,10 @@ button {
     border: 1px solid #ddd;
     border-radius: 4px;
     background-color: white;
-    margin-top: 10px;
-    padding: 10px 15px;
+    padding: 0px 15px;
     width: 100%;
     box-sizing: border-box;
-    max-height: 200px;
+    max-height: 300px;
     opacity: 1;
     transition: max-height 0.3s ease, opacity 0.3s ease;
     overflow: hidden;
@@ -78,7 +77,9 @@ button {
 
 #options-dropdown label {
     display: block;
-    margin-bottom: 8px;
+    margin-top: 5px;
+    margin-bottom: 5px;
+    font-size: 14px;
 }
 
 #start-btn {
@@ -94,13 +95,7 @@ button {
     background-color: #17a2b8;
 }
 
-#res-label {
-    margin-top: 15px;
-    font-size: 14px;
-}
-
 #resolution-select {
-    margin-top: 5px;
     width: 100%;
     padding: 8px;
     font-size: 14px;
@@ -111,7 +106,6 @@ button {
 #framerate-slider {
     width: 100%;
     max-width: 500px;
-    margin-top: 5px;
 }
 
 /* Video container and canvas */

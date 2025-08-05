@@ -10,6 +10,7 @@ from urllib.parse import parse_qs #parsing websocket URL params
 from websockets import connect #providing websocket clients
 from time import time #for timeouts
 from base64 import b64encode, b64decode #encoding images
+from collections import deque #video buffer
 import os
 import threading
 
@@ -47,6 +48,7 @@ class Client:
         self.get_default_video_values()
         self.supported = self.get_supported() #return list of camera's supported resolutions and max framerate
         self.latest_fm_update = None #buffer of latest update from FaceManager
+        self.video_frame_buffer = deque(maxlen=1000) #store last 1000 frames, will get last 5 seconds based on fps (max framerate of 200fps supported)
 
     def __del__(self):
         if hasattr(self, "fm_client"): #if FaceManager client is set
@@ -228,6 +230,7 @@ class Client:
 
         if self.params.FRAME_COUNTER % self.params.FRAME_RATE_SKIP != 0: #if we need to skip the current frame
             self.params.FRAME_COUNTER += 1
+            self.video_frame_buffer.append(self.current_frame)
             return (False, self.current_frame)
         if self.params.FRAME_COUNTER >= self.params.FRAME_RATE: #reset the frame counter
             self.params.FRAME_COUNTER = 0
@@ -235,6 +238,7 @@ class Client:
         self.current_frame = frame #set new frame if skip isn't needed
         self.params.FRAME_COUNTER += 1 #increase frame counter
 
+        self.video_frame_buffer.append(self.current_frame)
         return (True, self.current_frame)
 
     async def fm_identity(self):
@@ -260,6 +264,17 @@ class Client:
             except Exception as e:
                 print(f"Client websocket error when fm_identity: {e}")
                 await sleep(0)
+    
+    def get_last_five_seconds_from_buffer(self):
+        buffer_list = list(self.video_frame_buffer)
+        frames_amt = min(len(buffer_list), self.params.FRAME_RATE * 5)
+        buffer_list[-frames_amt:]
+
+    #TODO limit video length?
+    #TODO add video handler. Continuously check fm_last_update:
+    #   do nothing if there is no update
+    #   write the video if the update is older than 5 seconds
+    #   send video (or individual frames) as b64 to db, db then saves video
 
 global facemanager
 global client
@@ -366,6 +381,17 @@ async def get_labels():
                 return await resp.json()
     except Exception as e:
         return responses.JSONResponse({"error":f"Error getting audit labels: {e}"}, status_code=400)
+
+@app.get("/recent_faces")
+async def recent_faces():
+    if client.params.FM_IP == "":
+        return responses.JSONResponse({"error":"FaceManager not connected"}, status_code=400)
+    try:
+        async with ClientSession() as session:
+            async with session.get(f"http://{client.params.FM_IP}/recent_faces") as resp:
+                return await resp.json()
+    except Exception as e:
+        return responses.JSONResponse({"error":f"Error getting recent faces: {e}"}, status_code=400)
 
 @app.websocket("/ws/video_feed")
 async def websocket_video(websocket: WebSocket):

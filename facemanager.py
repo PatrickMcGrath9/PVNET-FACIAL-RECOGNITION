@@ -16,10 +16,12 @@ import torch
 import onnxruntime
 
 from base64 import b64encode, b64decode
+from collections import deque
 
 class FaceManager: #TODO make singleton
     class params:
-        ENCODING_MATCH_TOLERANCE = 25.0 #how far apart should encodings be to qualify as matches
+        ENCODING_MATCH_TOLERANCE = 0.1
+        DEFAULT_MATCH_THRESHOLD = 0.1
         DB_IP = ""
     
     def __init__(self):
@@ -28,6 +30,7 @@ class FaceManager: #TODO make singleton
         self.update_queue = asyncio.Queue()
         self.set_identifier() #initialize face identifier model
         self.initial_update = False
+        self.recent_faces = deque(maxlen=20)
     
     def __del__(self):
         if hasattr(self, "db_client"):
@@ -68,8 +71,9 @@ class FaceManager: #TODO make singleton
                         while True:
                             msg = await updater.recv()
                             data = json.loads(msg)
-                            self.db_encodings = {id:json.loads(encoding) for id,encoding in data["encodings"]}
-                            self.db_labels = {id:label for id,label in data["labels"]}
+                            self.db_encodings = data["encodings"]
+                            self.params.ENCODING_MATCH_TOLERANCE = self.calculate_dynamic_threshold() #default value
+                            self.db_labels = data["labels"]
                             print("FaceManager updated from DB.")
                             self.initial_update = True
 
@@ -89,18 +93,30 @@ class FaceManager: #TODO make singleton
         #TODO: run the trained NN first, then use on fail encoding fall back
         #return self.identify_face(face_crop)
         for face in faces:
-            id = self.identify_face_fallback(face)
-
-            if id[0] is None: #if no match
+            id,encoding = self.identify_face_fallback(face)
+            label = "?"
+            if id is None: #if no match
+                new_id = str(uuid.uuid4())
+                encoding = encoding.tolist()
+                self.db_encodings[new_id] = encoding
+                self.db_labels[new_id] = "?"
                 update = {
-                    "id": str(uuid.uuid4()),
-                    "encoding": id[1].tolist(),
+                    "id": new_id,
+                    "encoding": encoding,
                     "face_image": self.encode_image(face),
                 }
                 self.update_queue.put_nowait(json.dumps(update))
-                labels.append("?")
             else:
-                labels.append(self.db_labels[id])
+                label = self.db_labels[id]
+
+            labels.append(label)
+            in_recents = False
+            for recent in self.recent_faces:
+                if recent[2] == id:
+                    in_recents = True
+                    break
+            if not in_recents:
+                self.recent_faces.append((time.time(),self.encode_image(face),id))
         return labels
                 
     def identify_face(self, face_crop):
@@ -120,21 +136,66 @@ class FaceManager: #TODO make singleton
         input_name = self.embed_net.get_inputs()[0].name  # Get the input layer name of the model
         input_data = numpy.array(blob, dtype=float32)  # Convert to float32 if needed
         outputs = self.embed_net.run(None, {input_name: input_data})
-        embedding = outputs[0]       
+        embedding = outputs[0]
+        embedding = embedding.squeeze()  
         
-        match = None
+        # min_dist = float('inf')
+        # best_match_id = None
+        # for id in self.db_encodings.keys():
+        #     avg_encoding = numpy.array(self.db_encodings[id], dtype=float32)
+        #     dist = numpy.linalg.norm(embedding-avg_encoding) #calculate distance between that embedding and the current
+        #     print(f"Ordinary distance of id {id}:", dist)
+        #     if dist < min_dist:
+        #         min_dist = dist
+        #         best_match_id = id
 
-        for id in self.db_encodings.keys(): #for every existing embeedding
-            encoding = self.db_encodings[id]
-            dist = numpy.linalg.norm(embedding-numpy.array(encoding, dtype=float32)) #calculate distance between that embedding and the current
-            if dist < self.params.ENCODING_MATCH_TOLERANCE: #if below some tolerance
-                match = id #found!
-                break
-        if not match:
-            return (None,embedding)
+        embedding /= numpy.linalg.norm(embedding) 
+        max_similarity = -1
+        best_match_id = None
+        for id in self.db_encodings.keys():
+            avg_encoding = numpy.array(self.db_encodings[id], dtype=float32)
+            avg_encoding /= numpy.linalg.norm(avg_encoding)
+
+            similarity = numpy.dot(embedding, avg_encoding)
+            print(f"Cosine Similarity of id {id}:", similarity)
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_match_id = id
+
+        if best_match_id is not None and max_similarity > self.params.ENCODING_MATCH_TOLERANCE:
+            return (best_match_id, None)
         else:
-            #TODO match found, update DB recent faces
-            return match
+            return (None, embedding)
+
+    async def initially_updated(self):
+        while not self.initial_update:
+            await asyncio.sleep(0.1)
+
+    def calculate_dynamic_threshold(self):
+        similarities = []
+        ids = list(self.db_encodings.keys())
+
+        for id in ids:
+            emb1 = numpy.array(self.db_encodings[id], dtype=numpy.float32)
+            emb1 /= numpy.linalg.norm(emb1)
+            for other_id in ids:
+                if id == other_id:
+                    continue
+                emb2 = numpy.array(self.db_encodings[other_id], dtype=numpy.float32)
+                emb2 /= numpy.linalg.norm(emb2)
+                similarity = numpy.dot(emb1, emb2)
+                similarities.append(similarity)
+
+        if len(similarities) == 0:
+            return self.params.DEFAULT_MATCH_THRESHOLD
+        mean_sim = numpy.mean(similarities)
+        std_sim = numpy.std(similarities)
+        print(f"Mean: {mean_sim}, STD: {std_sim}")
+        threshold = mean_sim - 2.5 * std_sim
+        print(f"New Cosine Similarity Threshold: {threshold}")
+        return threshold
+                
+
 
 global database
 global facemanager
@@ -189,12 +250,17 @@ async def update_unknown(request:fastapi.Request):
     except Exception as e:
         return fastapi.responses.JSONResponse({"error":f"[FaceManager] Error updating unknown: {e}"}, status_code=400)
 
+@app.get("/recent_faces")
+async def recent_faces():
+    return fastapi.responses.JSONResponse({"recents":list(facemanager.recent_faces)})
+
 @app.websocket("/ws/identify")
 async def identify(websocket: fastapi.WebSocket):
     await websocket.accept()
     if facemanager.params.DB_IP == "":
         await database_setup()
     try:
+        await facemanager.initially_updated()
         while True:
             payload = json.loads(await websocket.receive_text())
             if time.time()-payload["time"] > 1:

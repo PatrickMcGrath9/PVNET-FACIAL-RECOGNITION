@@ -76,14 +76,24 @@ class DatabaseManager:
             )
 
     def get_encodings(self):
+        encodings = {} #id:[encodings]
         with self.get_cursor() as cursor:
             cursor.execute('''SELECT person_id, encoding FROM encodings''')
-            return cursor.fetchall()
-    
+            for entry in cursor.fetchall():
+                person_id = entry[0]
+                encoding = json.loads(entry[1])
+                if person_id in encodings:
+                    encodings[person_id].append(encoding)
+                else:
+                    encodings[person_id] = [encoding]
+        for id in encodings.keys():
+            encodings[id] = numpy.mean(numpy.array(encodings[id]), axis=0).tolist()
+        return encodings
+
     def get_labels(self):
         with self.get_cursor() as cursor:
             cursor.execute('''SELECT person_id, label FROM people''')
-            return cursor.fetchall()
+            return {entry[0]: entry[1] for entry in cursor.fetchall()}
 
     def get_first_unknown(self):
         with self.get_cursor() as cursor:
