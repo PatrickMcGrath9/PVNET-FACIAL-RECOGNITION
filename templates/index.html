@@ -4,46 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Facial Recognition Client</title>
-    <link rel="stylesheet" href="/static/css/styles.css?v=0.07" />
+    <link rel="stylesheet" href="/static/css/styles.css?v=0.08" />
 </head>
 <body>
-    <h1>Client is Running</h1>
-
-    <!-- Container for controls and video side by side -->
-    <div id="main-layout">
-        <div id="controls">
-            <button id="toggle-options">Options ▼</button>
-            <div id="options-dropdown">
-                {%set resolutions = supported['resolutions']%}
-                {%set framerate = supported['framerate']%}
-
-                <label for="resolution-select" id="res-label">Resolution:</label>
-                <select id="resolution-select">
-                    {%for resolution in resolutions%}
-                        <option value="{{resolution.width ~ 'x' ~ resolution.height}}">{{resolution.width ~ ' x ' ~ resolution.height}}</option>
-                    {%endfor%}
-                </select>
-
-                <label for="framerate-slider">Framerate: <span id="framerate-value">{{framerate}}</span></label>
-                <input type="range" id="framerate-slider" min="1" max={{framerate}} step="1" value={{framerate}} />
-                
-                <label for="contrast-slider">Constrast</label>
-                <input type="range" id="contrast-slider" min="0" max="1000" step="1" value="{{current_constrast}}"/>
-
-                <label for="gamma-slider">Gamma</label>
-                <input type="range" id="gamma-slider" min="0" max="1000" step="1" value="{{current_gamma}}"/>
-            </div>
-            <button id="start-btn">Start</button>
-            <button id="video-btn">Video Feed</button>
-            
-        </div>
-
-        <!-- Video feed placed beside the controls -->
-        <div id="video-container">
-            <canvas id="videoCanvas" width="640" height="480"></canvas>
-        </div>
-    </div>
-
-    <script type="module" src="/static/js/main.js"></script>
+    {% include "nav.html" %}
+    <h1>Welcome to PVNET Facial Recognition</h1>
+    <p style="text-align:center; font-size:1.2em; color:#555; margin-top:24px;">
+        Use the navigation menu above to access the video feed, audit unknown faces, or login.
+    </p>
 </body>
 </html>

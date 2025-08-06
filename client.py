@@ -281,16 +281,52 @@ global client
 facemanager = None
 client = Client()
 
+# app = FastAPI() #initialize the API
+
+# # Mount static files (for CSS, JS)
+# app.mount("/static", StaticFiles(directory="static"), name="static")
+# templates = Jinja2Templates(directory="templates")
+
+# @app.get("/")
+# async def root(request: Request):
+#     # Serve the HTML UI from template file, passing request for Jinja2
+#     return templates.TemplateResponse("index.html", {"request": request, "supported":client.supported, "current_contrast":client.params.VIDEO_CONSTRAST, "current_gamma":client.params.VIDEO_GAMMA})
+
+
 app = FastAPI() #initialize the API
 
 # Mount static files (for CSS, JS)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     # Serve the HTML UI from template file, passing request for Jinja2
     return templates.TemplateResponse("index.html", {"request": request, "supported":client.supported, "current_contrast":client.params.VIDEO_CONSTRAST, "current_gamma":client.params.VIDEO_GAMMA})
+
+@app.get("/video_feed", response_class=HTMLResponse)
+async def video_feed_page(request: Request):
+    # Serve the video feed UI
+    return templates.TemplateResponse("video_feed.html", {
+        "request": request,
+        "supported": client.supported,
+        "current_constrast": client.params.VIDEO_CONSTRAST,
+        "current_gamma": client.params.VIDEO_GAMMA
+    })
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_get(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_post(request: Request):
+    form = await request.form()
+    username = form.get("username")
+    password = form.get("password")
+    # TODO: Add authentication logic here
+    message = "Login attempted (demo only, no authentication yet)."
+    return templates.TemplateResponse("login.html", {"request": request, "message": message})
 
 @app.get("/facemanager_setup")
 async def facemanager_setup(ip:str="",port:str=""):

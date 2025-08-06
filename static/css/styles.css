@@ -1,18 +1,64 @@
 body {
-    font-family: Arial, sans-serif;
-    margin: 20px;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    margin: 0;
+    background: #f4f6f8;
+    color: #222;
 }
 
 h1 {
     text-align: center;
+    font-weight: 600;
+    margin-top: 40px;
+    margin-bottom: 20px;
+    color: #2c3e50;
 }
 
-#status-container p {
-    margin: 5px 0;
-    font-size: 1.1em;
+.navbar {
+    background: #2c3e50;
+    box-shadow: 0 2px 8px rgba(44,62,80,0.08);
+    margin-bottom: 32px;
 }
 
-/* Layout container for controls and video side by side */
+.navbar-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 24px;
+    height: 56px;
+}
+
+.navbar-brand {
+    color: #fff;
+    font-size: 1.3em;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.navbar-links {
+    display: flex;
+    gap: 32px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.navbar-links a {
+    color: #fff;
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s;
+    padding: 6px 12px;
+    border-radius: 4px;
+}
+
+.navbar-links a:hover,
+.navbar-links a.active {
+    background: #34495e;
+    color: #ffd700;
+}
+
 #main-layout {
     display: flex;
     justify-content: center;
@@ -22,24 +68,30 @@ h1 {
     flex-wrap: wrap;
 }
 
-/* Controls styling */
 #controls {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    max-width: 300px;
+    max-width: 320px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(44,62,80,0.08);
+    padding: 24px 20px;
 }
 
 button {
-    margin-top: 10px;
-    padding: 10px 20px;
+    margin-top: 12px;
+    padding: 12px 24px;
     font-size: 16px;
-    border-radius: 5px;
+    border-radius: 6px;
     border: none;
     color: white;
     cursor: pointer;
     align-self: stretch;
-    max-width: 300px;
+    max-width: 320px;
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(44,62,80,0.08);
+    transition: background 0.2s;
 }
 
 #toggle-options {
@@ -48,38 +100,6 @@ button {
 
 #toggle-options:hover {
     background-color: #0056b3;
-}
-
-#dropdown-arrow.open {
-    transform: rotate(180deg);
-}
-
-#options-dropdown {
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    background-color: white;
-    padding: 0px 15px;
-    width: 100%;
-    box-sizing: border-box;
-    max-height: 300px;
-    opacity: 1;
-    transition: max-height 0.3s ease, opacity 0.3s ease;
-    overflow: hidden;
-}
-
-#options-dropdown.hidden {
-    max-height: 0;
-    opacity: 0;
-    padding-top: 0;
-    padding-bottom: 0;
-    visibility: hidden;
-}
-
-#options-dropdown label {
-    display: block;
-    margin-top: 5px;
-    margin-bottom: 5px;
-    font-size: 14px;
 }
 
 #start-btn {
@@ -95,31 +115,113 @@ button {
     background-color: #17a2b8;
 }
 
-#resolution-select {
+#options-dropdown {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+    padding: 10px 18px;
     width: 100%;
+    box-sizing: border-box;
+    max-height: 300px;
+    opacity: 1;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+#options-dropdown.hidden {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    visibility: hidden;
+}
+
+#options-dropdown label {
+    display: block;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    font-size: 15px;
+    color: #2c3e50;
+    font-weight: 500;
+}
+
+#resolution-select,
+#framerate-slider,
+#contrast-slider,
+#gamma-slider {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+#resolution-select {
     padding: 8px;
-    font-size: 14px;
-    border-radius: 4px;
+    font-size: 15px;
+    border-radius: 6px;
     border: 1px solid #ccc;
+    background: #fff;
 }
 
 #framerate-slider {
-    width: 100%;
     max-width: 500px;
 }
 
-/* Video container and canvas */
 #video-container {
     display: flex;
     justify-content: flex-start;
     align-items: flex-start;
-    min-width: 640px;     /* prevents shifting when resolution changes */
+    min-width: 640px;
     min-height: 480px;
 }
 
 #videoCanvas {
-    border: 1px solid #ccc;
-    border-radius: 8px;
+    border: 2px solid #007bff;
+    border-radius: 12px;
     width: 640px;
     height: 480px;
+    background: #222;
+    box-shadow: 0 2px 8px rgba(44,62,80,0.08);
+}
+
+form {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(44,62,80,0.08);
+    padding: 32px 24px;
+    margin: 32px auto;
+    max-width: 350px;
+}
+
+form label {
+    font-weight: 500;
+    color: #2c3e50;
+    margin-bottom: 6px;
+    display: block;
+}
+
+form input[type="text"],
+form input[type="password"] {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 16px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 15px;
+    background: #f9f9f9;
+}
+
+form button {
+    background: #007bff;
+    color: #fff;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    padding: 12px 24px;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: background 0.2s;
+}
+
+form button:hover {
+    background: #0056b3;
 }

@@ -1,37 +1,64 @@
 body {
-    font-family: Arial, sans-serif;
+    font-family: 'Segoe UI', Arial, sans-serif;
     padding: 20px;
-    background-color: #f8f8f8;
+    background-color: #f4f6f8;
 }
 
 h1 {
     text-align: center;
+    color: #2c3e50;
 }
 
 #unknown-faces-container {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 20px;
+    gap: 24px;
 }
 
 .face-card {
     background: white;
-    border: 1px solid #ccc;
-    padding: 15px;
-    border-radius: 10px;
+    border: 1px solid #ddd;
+    padding: 20px 18px;
+    border-radius: 12px;
     text-align: center;
-    width: 200px;
-    box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    width: 220px;
+    box-shadow: 0 2px 8px rgba(44,62,80,0.08);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 .face-card img {
     max-width: 100%;
-    border-radius: 5px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(44,62,80,0.08);
 }
 
+.face-card select,
 .face-card input {
     margin-top: 10px;
     width: 100%;
-    padding: 5px;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 15px;
+    background: #f9f9f9;
+}
+
+.face-card button {
+    margin-top: 14px;
+    padding: 10px 18px;
+    background: #007bff;
+    color: #fff;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.face-card button:hover {
+    background: #0056b3;
 }

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Login</title>
+    <link rel="stylesheet" href="/static/css/styles.css?v=0.08" />
+</head>
+<body>
+    {% include "nav.html" %}
+    <h1>Login</h1>
+    <form method="post" action="/login">
+        <label for="username">Username:</label>
+        <input type="text" id="username" name="username" required>
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" required>
+        <button type="submit">Login</button>
+        {% if message %}
+            <p style="color:red; margin-top:10px;">{{ message }}</p>
+        {% endif %}
+    </form>
+</body>
+</html>
