@@ -65,6 +65,7 @@ button {
     opacity: 1;
     transition: max-height 0.3s ease, opacity 0.3s ease;
     overflow: hidden;
+    max-width: 200px;
 }
 
 #options-dropdown.hidden {
@@ -91,8 +92,12 @@ button {
     cursor: not-allowed;
 }
 
-#video-btn {
-    background-color: #17a2b8;
+#camera-select{
+    width: 100%;
+    padding: 8px;
+    font-size: 14px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
 }
 
 #resolution-select {
@@ -122,4 +127,5 @@ button {
     border-radius: 8px;
     width: 640px;
     height: 480px;
+    object-fit: contain;
 }

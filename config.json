@@ -1,4 +1,7 @@
 {
     "detector_model_path":"models/face_detection_yunet_2023mar.onnx",
-    "identifier_model_path":"models/arcfaceresnet100-8.onnx"
+    "identifier_model_path":"models/arcfaceresnet100-8.onnx",
+    "db_path": "DB",
+    "db_file_path": "db.sqlite3",
+    "face_images_path": "faces"
 }

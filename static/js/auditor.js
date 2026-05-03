@@ -1,11 +1,10 @@
 const container = document.getElementById("unknown-faces-container");
-let labels = null;
-
-import {connectFaceManager} from './connection.js'
+let labels = [];
+let unknownsQueue = INITIAL_UNKNOWNS || [];
 
 async function updateLabels(){
     try{
-        const response = await fetch("/audit/labels", {
+        const response = await fetch("/audit/known_labels", {
             headers: { "Cache-Control": "no-cache" }
         });
         if(!response.ok){
@@ -17,23 +16,6 @@ async function updateLabels(){
         }
     }catch (err) {
         console.error("Failed to update labels:", err);
-    }
-}
-
-async function loadNextUnknown(){
-    try{
-        const response = await fetch("/audit/unknown", {
-            headers: { "Cache-Control": "no-cache" }
-        });
-        if (!response.ok) {
-            throw new Error(`Failed to load unknown faces: HTTP ${response.status} - ${await response.text()}`);
-        }
-        const resp_json = await response.json();
-        if(!("error" in resp_json)){
-            return resp_json
-        }
-    }catch(err){
-        console.error("Failed to get next unknown:", err);
     }
 }
 
@@ -50,7 +32,7 @@ async function createUIForItem(item){
     };
 
     const select = document.createElement("select");
-    select.innerHTML =  '<option value="placeholder" disabled selected hidden>Select a name</option>' + '<option value="new">New Name</option>' +
+    select.innerHTML =  '<option value="placeholder" disabled selected hidden>Select a name</option>' + '<option value="new">New Name</option>' + '<option value="remove">Remove</option>' +
                         labels.map(([id, label]) => `<option value="${id}">${label}</option>`).join('');
 
     const input = document.createElement("input");
@@ -66,7 +48,7 @@ async function createUIForItem(item){
     };
 
     const button = document.createElement("button");
-    button.textContent = "Assign Name";
+    button.textContent = "Submit";
     button.onclick = async () => {
         try{
             submit(item, select, input);
@@ -97,7 +79,7 @@ async function submit(item, select, input){
                 alert("Please select a name or enter a new one.");
                 return
             }
-            const response = await fetch("/audit/unknown",{
+            const response = await fetch("/audit/unknowns",{
                 method: "PATCH",
                 headers: {"Content-Type":"application/json"},
                 body: JSON.stringify({id: item.id, label: update_value})
@@ -110,16 +92,30 @@ async function submit(item, select, input){
                 throw new Error(resp_json.error)
             }
         }
+        else if(select.value === "remove"){
+            const response = await fetch("/audit/unknowns",{
+                method: "PATCH",
+                headers: {"Content-Type":"application/json"},
+                body: JSON.stringify({delete:true, id:item.id})
+            });
+            if (!response.ok){
+                throw new Error(`Failed to assign name: ${await response.text()}`)
+            }
+            const resp_json = await response.json();
+            if("error" in resp_json){
+                throw new Error(resp_json.error)
+            }
+        }
         else{
             const old_id = item.id
             const new_id = select.value
-            const response = await fetch("/audit/unknown",{
+            const response = await fetch("/audit/unknowns",{
                 method: "PATCH",
                 headers: {"Content-Type":"application/json"},
                 body: JSON.stringify({old_id, new_id})
             });
             if (!response.ok){
-                throw new Error(`Failed to assign name: ${await resp.text()}`)
+                throw new Error(`Failed to transfer: ${await resp.text()}`)
             }
             const resp_json = await response.json();
             if("error" in resp_json){
@@ -134,7 +130,13 @@ async function submit(item, select, input){
 
 async function processNextItem() {
     await updateLabels();
-    const item = await loadNextUnknown();
+
+    let item = null;
+
+    if (unknownsQueue.length > 0) {
+        item = unknownsQueue.shift();
+    }
+
     if (item) {
         await createUIForItem(item);
     } else {
@@ -142,5 +144,4 @@ async function processNextItem() {
     }
 }
 
-await connectFaceManager();
 await processNextItem();
